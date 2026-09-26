@@ -71,8 +71,6 @@ export const USER_EXAMPLE: Inputs = {
   years: 30,
 };
 
-export const DEFAULTS: Inputs = USER_EXAMPLE;
-
 /** An investment portfolio split between an ISA and a taxable account. */
 interface Pot {
   isa: number;
@@ -119,8 +117,8 @@ function grow(pot: Pot, monthlyRate: number) {
   pot.gia *= 1 + monthlyRate;
 }
 
-function potAfterTax(pot: Pot, cgtRate: number): number {
-  return pot.isa + pot.gia - cgtOnGia(pot.gia, pot.giaBasis, cgtRate) - pot.shortfall;
+function potAfterTax(pot: Pot, cgtRate: number, people: number): number {
+  return pot.isa + pot.gia - cgtOnGia(pot.gia, pot.giaBasis, cgtRate, people) - pot.shortfall;
 }
 
 export interface YearRow {
@@ -186,7 +184,7 @@ export function upfrontCosts(p: Inputs): Upfront {
     stampDuty: sdlt,
     fees: p.purchaseFees,
     cashNeeded: p.deposit + sdlt + p.purchaseFees,
-    maxLoan: p.salary * p.incomeMultiple,
+    maxLoan: p.salary * p.earners * p.incomeMultiple,
     loanToValue: p.price > 0 ? (loan / p.price) * 100 : 0,
   };
 }
@@ -201,7 +199,8 @@ const monthly = (annualPct: number) => Math.pow(1 + annualPct / 100, 1 / 12) - 1
  */
 export function project(p: Inputs): Projection {
   const upfront = upfrontCosts(p);
-  const takeHome = takeHomePay(p.salary);
+  const takeHome = p.earners * takeHomePay(p.salary);
+  const isaAllowance = ISA_ALLOWANCE * p.earners;
   const marginalRate = marginalTaxRate(p.salary);
   const budget0 = takeHome - p.livingCosts;
 
@@ -229,8 +228,8 @@ export function project(p: Inputs): Projection {
   };
 
   const snapshot = (year: number, acc: Omit<YearRow, "year" | "renterPortfolio" | "renterNetWorth" | "propertyValue" | "mortgageBalance" | "equity" | "buyerPortfolio" | "buyerNetWorth" | "deflator">): YearRow => {
-    const renterPortfolio = potAfterTax(renter, p.cgtRate);
-    const buyerPortfolio = potAfterTax(buyer, p.cgtRate);
+    const renterPortfolio = potAfterTax(renter, p.cgtRate, p.earners);
+    const buyerPortfolio = potAfterTax(buyer, p.cgtRate, p.earners);
     const equity = houseValue * (1 - p.sellingCostPct / 100) - balance;
     return {
       year,
@@ -262,8 +261,8 @@ export function project(p: Inputs): Projection {
 
   for (let y = 0; y < p.years; y++) {
     const acc = { ...zero };
-    let renterIsaRoom = ISA_ALLOWANCE;
-    let buyerIsaRoom = ISA_ALLOWANCE;
+    let renterIsaRoom = isaAllowance;
+    let buyerIsaRoom = isaAllowance;
     // Pay rises and rent reviews happen once a year.
     const budget = (budget0 * Math.pow(1 + p.wageGrowth / 100, y)) / 12;
     const rent = p.rent * Math.pow(1 + p.rentGrowth / 100, y);

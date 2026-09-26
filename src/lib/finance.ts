@@ -96,9 +96,9 @@ export function rentARoomTax(annualLodgerIncome: number, marginalRatePct: number
   return Math.max(0, annualLodgerIncome - RENT_A_ROOM_ALLOWANCE) * (marginalRatePct / 100);
 }
 
-/** CGT due if a general (non-ISA) investment account were sold today. */
-export function cgtOnGia(value: number, costBasis: number, cgtRatePct: number): number {
-  const gain = value - costBasis - CGT_ANNUAL_EXEMPTION;
+/** CGT due if a general (non-ISA) investment account shared by `people` adults were sold today. */
+export function cgtOnGia(value: number, costBasis: number, cgtRatePct: number, people = 1): number {
+  const gain = value - costBasis - CGT_ANNUAL_EXEMPTION * people;
   return gain > 0 ? gain * (cgtRatePct / 100) : 0;
 }
 

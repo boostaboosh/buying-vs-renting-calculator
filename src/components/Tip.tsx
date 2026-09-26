@@ -32,8 +32,8 @@ export function Tip({ children, tip, className }: { children: ReactNode; tip: Ti
   };
 
   // Place the popover under the trigger (or above if there's no room), inside the viewport.
-  useLayoutEffect(() => {
-    if (!open || !trigger.current || !pop.current) return;
+  const place = () => {
+    if (!trigger.current || !pop.current) return;
     const r = trigger.current.getBoundingClientRect();
     const p = pop.current.getBoundingClientRect();
     const margin = 12;
@@ -42,6 +42,9 @@ export function Tip({ children, tip, className }: { children: ReactNode; tip: Ti
     let top = r.bottom + 8;
     if (top + p.height > window.innerHeight - margin && r.top - p.height - 8 > margin) top = r.top - p.height - 8;
     setPos({ top, left });
+  };
+  useLayoutEffect(() => {
+    if (open) place();
   }, [open]);
 
   useEffect(() => {
@@ -60,17 +63,17 @@ export function Tip({ children, tip, className }: { children: ReactNode; tip: Ti
         setPinned(false);
       }
     };
-    const onScroll = () => {
-      setOpen(false);
-      setPinned(false);
-    };
+    // Follow the trigger when the page or a scrolling panel moves.
+    const onMove = () => place();
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onDown);
-    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("scroll", onMove, { passive: true, capture: true });
+    window.addEventListener("resize", onMove);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onMove, { capture: true });
+      window.removeEventListener("resize", onMove);
     };
   }, [open]);
 

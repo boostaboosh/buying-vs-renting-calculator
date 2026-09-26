@@ -23,6 +23,17 @@ It goes past the usual "rent £24k vs mortgage interest £12k" sum by including:
   CGT-free main home, Rent-a-Room relief for a lodger.
 - **Repayment or interest-only** mortgages, and selling costs at the end.
 
+**Defaults come from official data**, with three starting points: a London
+household (two median London earners, average London home and rent), a UK
+household, and the original worked example. Salaries come from ONS ASHE 2025,
+prices from the UK House Price Index, rents from ONS private rent statistics,
+mortgage rates from the Bank of England, living costs from ONS Family spending,
+and investment returns from the UBS Global Investment Returns Yearbook, which
+Monevator draws on. Every source is listed on the page and in
+[`src/lib/sources.ts`](src/lib/sources.ts). Hover over or tap any underlined
+figure or input to see what it is, how it's worked out, and where the number
+comes from.
+
 Results: net worth over time (today's money or future pounds), the year buying pulls
 ahead, the break-even house price growth, a year-one "money gone" comparison, and a
 mortgage-rate × house-growth sensitivity grid.
@@ -62,6 +73,9 @@ real-world rule before touching either.
 - `src/lib/uk.ts`: tax thresholds and stamp duty bands
 - `src/lib/finance.ts`: mortgage maths, stamp duty, take-home pay, CGT, Rent-a-Room
 - `src/lib/projection.ts`: the month-by-month rent vs buy simulation
+- `src/lib/defaults.ts`: starting values, with the reason for each
+- `src/lib/sources.ts`: the statistics behind them, with links and dates
+- `src/explain.tsx`: the hover explanations for every figure
 - `src/App.tsx`: the page
 
 ## Not modelled (yet)
