@@ -858,3 +858,10 @@ table {
     display: inline-block;
   }
 }
+
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: end;
+}

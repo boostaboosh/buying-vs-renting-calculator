@@ -50,3 +50,12 @@ test.describe("phone", () => {
     await expect(page).toHaveScreenshot("phone-first-screen.png");
   });
 });
+
+test.describe("your example", () => {
+  test.use({ viewport: { width: 1360, height: 900 } });
+  test("leverage race totals catch up late", async ({ page }) => {
+    await openPage(page);
+    await page.getByRole("radio", { name: /Your example/ }).click();
+    await expect(card(page, "Leverage vs compounding")).toHaveScreenshot("light-leverage-example.png");
+  });
+});

@@ -174,13 +174,54 @@ export function explain({ p, proj, summary, real, breakeven, y1, race }: Context
       sources: ["giry"],
     } satisfies TipContent,
 
+    raceHomeTotal: {
+      title: "Everything the home's value has gained",
+      body: (
+        <>
+          <p className="calc">
+            {gbp(p.price)} × ((1 + {pct(p.houseGrowth)})<sup>{p.years}</sup> − 1) ={" "}
+            {gbp(race.rows[race.rows.length - 1]?.homeTotal ?? 0)} in pounds at the time
+          </p>
+          <p>Before selling costs. The buyer also still owes whatever is left of the mortgage.</p>
+        </>
+      ),
+      sources: ["housemetric", "ukhpi"],
+    } satisfies TipContent,
+
+    raceCashTotal: {
+      title: "Everything the invested cash has gained",
+      body: (
+        <>
+          <p className="calc">
+            {gbp(upfront.cashNeeded)} × ((1 + {pct(p.stockReturn)})<sup>{p.years}</sup> − 1) ={" "}
+            {gbp(race.rows[race.rows.length - 1]?.cashTotal ?? 0)} in pounds at the time
+          </p>
+          <p>Before tax, with nothing added after the start.</p>
+        </>
+      ),
+      sources: ["giry"],
+    } satisfies TipContent,
+
+    raceCatchUp: {
+      title: "When the invested cash catches up in total",
+      body: (
+        <>
+          <p>
+            The first year the invested cash has gained as much in total as the home. It always comes later than the
+            year it starts gaining more each year, because the home banked bigger gains before that.
+          </p>
+          <p className="calc">{race.catchUpYear ? `Year ${race.catchUpYear}` : `Not within ${p.years} years`}</p>
+        </>
+      ),
+    } satisfies TipContent,
+
     raceOvertake: {
       title: "When compounding overtakes leverage",
       body: (
         <>
           <p>
-            The first year the invested cash adds more than the home's price rise. The faster rate on the smaller sum
-            catches up with the slower rate on the bigger sum.
+            The first year the invested cash adds more than the home's price rise that year. The faster rate on the
+            smaller sum has caught up with the slower rate on the bigger sum, year by year. The totals meet later.
           </p>
           <p className="calc">
             {race.overtakeYear ? `Year ${race.overtakeYear}` : `Not within ${p.years} years`}

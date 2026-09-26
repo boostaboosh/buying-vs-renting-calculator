@@ -391,9 +391,11 @@ export function summarise(proj: Projection, real = false): Summary {
 }
 
 export interface LeverageRace {
-  rows: { year: number; homeGain: number; cashGain: number }[];
+  rows: { year: number; homeGain: number; cashGain: number; homeTotal: number; cashTotal: number }[];
   /** First year the invested cash adds at least as much as the home's price gain. */
   overtakeYear: number | null;
+  /** First year the invested cash has gained at least as much in total. */
+  catchUpYear: number | null;
 }
 
 /**
@@ -410,10 +412,13 @@ export function leverageRace(p: Inputs): LeverageRace {
       year: t,
       homeGain: p.price * (Math.pow(h, t) - Math.pow(h, t - 1)),
       cashGain: cash * (Math.pow(s, t) - Math.pow(s, t - 1)),
+      homeTotal: p.price * (Math.pow(h, t) - 1),
+      cashTotal: cash * (Math.pow(s, t) - 1),
     });
   }
   const overtake = rows.find((r) => r.cashGain >= r.homeGain);
-  return { rows, overtakeYear: overtake ? overtake.year : null };
+  const catchUp = rows.find((r) => r.cashTotal >= r.homeTotal);
+  return { rows, overtakeYear: overtake ? overtake.year : null, catchUpYear: catchUp ? catchUp.year : null };
 }
 
 /**
