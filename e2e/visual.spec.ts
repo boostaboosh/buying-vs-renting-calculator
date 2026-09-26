@@ -8,6 +8,7 @@ import { card, openPage } from "./helpers";
 const CARDS = [
   ["verdict", ".verdict"],
   ["whos-ahead", "Who's ahead"],
+  ["composition", "Where each net worth comes from"],
   ["leverage", "Leverage vs compounding"],
   ["costs", "Rent vs owning costs"],
   ["year-one", "The sum most people stop at"],

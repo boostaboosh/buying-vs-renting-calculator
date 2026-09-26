@@ -9,6 +9,7 @@
   --grid: #e6eaee;
   --buy: #2a78d6;
   --rent: #eb6834;
+  --shares: #1baf7a;
   --warn-bg: #fff4e0;
   --warn-ink: #7a4b00;
   --focus: #2a78d6;
@@ -31,6 +32,7 @@
     --grid: #232d38;
     --buy: #3987e5;
     --rent: #d95926;
+    --shares: #199e70;
     --warn-bg: #3a2a10;
     --warn-ink: #ffd89a;
     --focus: #6da7ec;
@@ -48,6 +50,7 @@
   --grid: #232d38;
   --buy: #3987e5;
   --rent: #d95926;
+  --shares: #199e70;
   --warn-bg: #3a2a10;
   --warn-ink: #ffd89a;
   --focus: #6da7ec;
@@ -864,4 +867,63 @@ table {
   flex-wrap: wrap;
   gap: 8px 12px;
   align-items: end;
+}
+
+/* Where each net worth comes from */
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+.swatch-home,
+.seg-home {
+  background: var(--buy);
+}
+.swatch-shares,
+.seg-shares {
+  background: var(--shares);
+}
+.composition {
+  display: grid;
+  gap: 14px;
+}
+.comp-year {
+  display: grid;
+  gap: 4px;
+}
+.comp-label {
+  font: 500 12px var(--mono);
+  color: var(--ink-3);
+}
+.comp-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.comp-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+}
+.comp-bar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  min-width: 0;
+}
+.seg {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  min-width: 0;
+}
+.comp-total {
+  font: 500 13px var(--mono);
+  text-align: right;
+  justify-self: end;
 }
