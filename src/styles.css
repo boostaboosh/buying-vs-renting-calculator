@@ -833,3 +833,12 @@ table {
 .checks p {
   margin: 0;
 }
+
+.facts.facts-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 560px) {
+  .facts.facts-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
