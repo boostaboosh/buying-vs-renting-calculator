@@ -43,6 +43,27 @@ export const SOURCES = {
     url: "https://www.bankofengland.co.uk/monetary-policy/inflation",
     figures: "The government's inflation target is 2% CPI. CPI was 3.1% in the year to August 2026 (ONS).",
   },
+  moneyfacts: {
+    publisher: "Moneyfacts (via Mortgage Strategy)",
+    title: "Average five-year fix at highest level since 2023",
+    url: "https://www.mortgagestrategy.co.uk/news/average-five-year-fix-at-highest-level-since-2023-moneyfacts/",
+    figures:
+      "The average five-year fixed mortgage rate rose from 4.94% in March 2026 to about 5.9% in September 2026, the highest since October 2023.",
+  },
+  housemetric: {
+    publisher: "Housemetric (HM Land Registry data)",
+    title: "London house prices and property market analysis",
+    url: "https://housemetric.co.uk/analysis/region/London",
+    figures:
+      "London flats: +0.1% a year above inflation over 20 years; −4.9% a year after inflation over the last 5 years.",
+  },
+  felix: {
+    publisher: "PWL Capital (Ben Felix)",
+    title: "Rent or own your home? A handy 5% rule",
+    url: "https://pwlcapital.com/rent-or-own-your-home-5-rule/",
+    figures:
+      "An owner's yearly unrecoverable costs are roughly 5% of the home's value: about 1% maintenance, 1% property tax and 3% cost of capital. If rent is less than that, renting is likely cheaper.",
+  },
   cpi: {
     publisher: "ONS",
     title: "Consumer price inflation, UK: August 2026",

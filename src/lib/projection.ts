@@ -22,7 +22,9 @@ export interface Inputs {
   deposit: number;
   firstTimeBuyer: boolean;
   purchaseFees: number; // legal, survey, mortgage arrangement fee
-  mortgageRate: number; // %
+  mortgageRate: number; // %, the starting fixed rate
+  fixYears: number; // years the starting rate is fixed
+  followOnRate: number; // % after the fixed period (remortgage)
   mortgageTerm: number; // years
   mortgageType: MortgageType;
   serviceCharge: number; // £/yr: service charge, ground rent, insurance
@@ -55,6 +57,8 @@ export const USER_EXAMPLE: Inputs = {
   firstTimeBuyer: true,
   purchaseFees: 3_000,
   mortgageRate: 3,
+  fixYears: 5,
+  followOnRate: 3,
   mortgageTerm: 30,
   mortgageType: "repayment",
   serviceCharge: 2_000,

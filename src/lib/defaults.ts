@@ -29,7 +29,10 @@ export const FIELD_HELP: Record<keyof Inputs, string> = {
   deposit: "Cash you put down. The rest of the price is borrowed.",
   firstTimeBuyer: "First-time buyers pay less stamp duty on homes up to £500,000.",
   purchaseFees: "One-off costs of buying besides stamp duty: conveyancing, searches, survey and the mortgage arrangement fee.",
-  mortgageRate: "The yearly interest rate, assumed fixed for the whole term.",
+  mortgageRate: "The yearly interest rate for the fixed period at the start of the mortgage.",
+  fixYears: "How long the starting rate is fixed. UK deals are usually fixed for 2 or 5 years; then you remortgage.",
+  followOnRate:
+    "The rate you remortgage onto when the fix ends, for the rest of the term. Nobody knows future rates, so try higher and lower values.",
   mortgageTerm: "Years until the loan is paid off.",
   mortgageType:
     "Repayment pays off the loan by the end of the term. Interest-only keeps payments low but leaves the whole loan to repay.",
@@ -79,7 +82,7 @@ const UK_RENT = 1_400; // ONS PIPR, August 2026
 const LONDON_ROOM = 915; // SpareRoom, Q2 2026
 const UK_ROOM = 761; // SpareRoom, Q2 2026
 const NON_HOUSING_SPEND = 29_026; // ONS Family spending FYE 2025: (£676.60 − £118.40) × 52
-const MORTGAGE_RATE = 4.45; // Bank of England, new mortgages, July 2026
+const MORTGAGE_RATE = 5.9; // Moneyfacts average five-year fix, September 2026
 const LONDON_FLAT_SERVICE_CHARGE = 1_920; // English Housing Survey 2023-24, London flats median
 const INFLATION = 2; // Bank of England target
 const PAY_GROWTH = 3.4; // OBR long-run productivity ~1.4% + 2% inflation
@@ -91,6 +94,8 @@ const shared = {
   firstTimeBuyer: true,
   purchaseFees: 3_000,
   mortgageRate: MORTGAGE_RATE,
+  fixYears: 5,
+  followOnRate: MORTGAGE_RATE,
   mortgageTerm: 30,
   mortgageType: "repayment",
   lodgerRent: 0,
@@ -128,8 +133,13 @@ const sharedWhy: Partial<Record<keyof Inputs, Note>> = {
     text: "An estimate: conveyancing and searches about £1,500 to £2,000, a survey about £500, and a mortgage arrangement fee about £1,000. There's no official average.",
   },
   mortgageRate: {
-    text: "The average rate actually paid on new mortgages in July 2026 was 4.45%. Deals with small deposits usually cost more, and big deposits get less.",
-    sources: ["boeRates"],
+    text: "The average five-year fixed rate on offer was about 5.9% in September 2026, the highest since 2023 (Moneyfacts). The average rate actually paid on new mortgages in July was lower, at 4.45%, because it includes deals agreed earlier and big deposits. Small deposits usually cost more.",
+    sources: ["moneyfacts", "boeRates"],
+  },
+  fixYears: { text: "Five years, the most common fixed period for home buyers.", sources: ["moneyfacts"] },
+  followOnRate: {
+    text: "Set to today's rate, so it assumes rates stay where they are. The Bank of England's own rate is 3.75%, and new mortgages cost about 4.5% as recently as July, so rates could just as easily fall. Try both.",
+    sources: ["moneyfacts", "boeRates"],
   },
   mortgageTerm: { text: "A common term. Longer terms lower the monthly payment but add interest. This is an assumption." },
   mortgageType: { text: "Most mortgages for homes you live in are repayment mortgages." },
@@ -184,8 +194,13 @@ export const PRESETS = {
       rent: LONDON_RENT,
       serviceCharge: LONDON_FLAT_SERVICE_CHARGE,
       maintenancePct: 0.5,
+      houseGrowth: INFLATION,
     },
     {
+      houseGrowth: {
+        text: "2% a year, the same as inflation, so prices stay flat in real terms. That's roughly what London flats have done over 20 years (0.1% a year above inflation, from Land Registry data). Over the last 5 years they fell 4.9% a year after inflation. Pay has grown faster than this, so there's a case for higher; the break-even figure shows how much it matters.",
+        sources: ["housemetric", "ukhpi"],
+      },
       earners: {
         text: "Two, because the average London home costs 11 times one median salary. On one median salary a lender would offer about £224,000, and the average rent would take most of your take-home pay.",
       },
