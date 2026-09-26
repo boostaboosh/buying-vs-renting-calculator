@@ -52,6 +52,11 @@ Capital gains tax if a general investment account worth `value`, bought for
 negative. Each adult has their own £3,000 annual exemption, so a jointly held
 account shared by two people gets £6,000.
 
+### `nominalRate(realPct, inflationPct): number`
+Converts a return above inflation into a nominal one:
+`((1 + realPct/100) × (1 + inflationPct/100) − 1) × 100`. For example, 5.2% real
+with 2% inflation is 7.304% nominal.
+
 ### `yearsToSave(target, annualSaving, returnPct, current = 0): number | null`
 Years until a pot reaches `target`. The pot starts at `current`. Each month it
 grows at `(1 + returnPct/100)^(1/12) − 1` and then receives `annualSaving / 12`.
@@ -211,6 +216,19 @@ first year ≥ 1 where buyer net worth ≥ renter net worth, else null.
 The first year ≥ 1 in which the renter's investment growth is at least the home's
 price gain (`renterInvestmentGain ≥ houseGain`), else null. Before this, leverage
 earns the buyer more each year; after it, the renter's compounding does.
+
+### `leverageRace(inputs)`
+Separates leverage from compounding, ignoring every other cash flow. It compares
+the home's price gain on the whole price with what the buyer's own cash would
+have earned if invested instead, with nothing added. For each year `t` from 1 to
+`years`, with `h = houseGrowth/100` and `s = stockReturn/100`:
+- `homeGain = price × ((1 + h)^t − (1 + h)^(t−1))`
+- `cashGain = cashNeeded × ((1 + s)^t − (1 + s)^(t−1))`, where `cashNeeded` is
+  from `upfrontCosts`
+
+Returns `{ rows: [{ year, homeGain, cashGain }], overtakeYear }`, where
+`overtakeYear` is the first `t` with `cashGain ≥ homeGain`, or null if that never
+happens within `years`. All figures are nominal.
 
 ### `breakevenHouseGrowth(inputs)`
 The `houseGrowth` at which the nominal `difference` at the horizon is 0. Rent
