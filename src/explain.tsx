@@ -2,7 +2,7 @@
 // out with the user's own numbers, and where the inputs come from.
 import type { TipContent } from "./components/Tip";
 import { stampDuty, takeHomePay, yearsToSave } from "./lib/finance";
-import type { Inputs, Projection, Summary, UnrecoverableCosts } from "./lib/projection";
+import type { Inputs, LeverageRace, Projection, Summary, UnrecoverableCosts } from "./lib/projection";
 import { SDLT_FTB_MAX_PRICE } from "./lib/uk";
 import { gbp, pct } from "./format";
 
@@ -13,12 +13,12 @@ export interface Context {
   real: boolean;
   breakeven: number | null;
   y1: UnrecoverableCosts;
-  overtake: number | null;
+  race: LeverageRace;
 }
 
 const money = (real: boolean) => (real ? "in today's money (adjusted for inflation)" : "in future pounds (not adjusted for inflation)");
 
-export function explain({ p, proj, summary, real, breakeven, y1, overtake }: Context) {
+export function explain({ p, proj, summary, real, breakeven, y1, race }: Context) {
   const { upfront, rows } = proj;
   const last = rows[rows.length - 1];
   const d = real ? last.deflator : 1;
@@ -143,31 +143,31 @@ export function explain({ p, proj, summary, real, breakeven, y1, overtake }: Con
       body: (
         <>
           <p>
-            The rise in the home's value in year one. You get the growth on the whole price, but you only put in the
-            deposit. The bank's money works for you, at the cost of the interest.
+            What the home's value adds in year one. The growth is on the whole price, though the buyer only put in{" "}
+            {gbp(upfront.cashNeeded)} of their own money. The bank's money works for them, at the cost of interest.
           </p>
           <p className="calc">
-            {gbp(p.price)} × {pct(p.houseGrowth)} ≈ {gbp(rows[1].houseGain)}
+            {gbp(p.price)} × {pct(p.houseGrowth)} = {gbp(race.rows[0]?.homeGain ?? 0)}
             <br />
-            {gbp(rows[1].houseGain)} ÷ {gbp(p.deposit)} deposit = {pct((rows[1].houseGain / Math.max(1, p.deposit)) * 100)}{" "}
-            return on your own money
+            {gbp(race.rows[0]?.homeGain ?? 0)} ÷ {gbp(upfront.cashNeeded)} ={" "}
+            {pct(((race.rows[0]?.homeGain ?? 0) / Math.max(1, upfront.cashNeeded)) * 100)} on your own cash
           </p>
+          <p>Each later year adds {pct(p.houseGrowth)} of a bigger value, so it compounds too, but slowly.</p>
         </>
       ),
       sources: ["housemetric", "ukhpi"],
     } satisfies TipContent,
 
-    raceRenter: {
-      title: "The renter's investment returns (compounding)",
+    raceCash: {
+      title: "The same cash invested instead (compounding)",
       body: (
         <>
           <p>
-            Growth on the renter's investments in year one, before tax. The pot starts with the{" "}
-            {gbp(upfront.cashNeeded)} the buyer spent, and grows as more is paid in and returns build on returns.
+            What the {gbp(upfront.cashNeeded)} the buyer spent (deposit, stamp duty and fees) would earn in a global
+            index fund, with nothing added. A smaller sum, but a higher return, and each year's return earns returns.
           </p>
           <p className="calc">
-            about {gbp(upfront.cashNeeded)} × {pct(p.stockReturn)}, plus growth on this year's payments in ={" "}
-            {gbp(rows[1].renterInvestmentGain)}
+            {gbp(upfront.cashNeeded)} × {pct(p.stockReturn)} = {gbp(race.rows[0]?.cashGain ?? 0)} in year 1
           </p>
         </>
       ),
@@ -179,18 +179,35 @@ export function explain({ p, proj, summary, real, breakeven, y1, overtake }: Con
       body: (
         <>
           <p>
-            The first year the renter's investments earn more than the home's price rises. From then on, the gap in
-            yearly growth favours renting and widens.
+            The first year the invested cash adds more than the home's price rise. The faster rate on the smaller sum
+            catches up with the slower rate on the bigger sum.
           </p>
           <p className="calc">
-            {overtake ? `Year ${overtake}` : `Not within ${p.years} years`}
+            {race.overtakeYear ? `Year ${race.overtakeYear}` : `Not within ${p.years} years`}
           </p>
           <p>
-            This isn't when renting pulls ahead overall: the buyer also saves by paying off the loan and, over time,
-            by rent rising faster than the mortgage. The net worth chart shows the overall result.
+            That's not when renting pulls ahead overall. Interest, rent against owning costs, and paying off the loan
+            also matter. The gap chart adds everything up.
           </p>
         </>
       ),
+    } satisfies TipContent,
+
+    rentYield: {
+      title: "Rent as a share of the home's value",
+      body: (
+        <>
+          <p>
+            A year's rent divided by the home's value (the gross rental yield). Over the long run it tends to stay in a
+            range, because rents and prices are both tied to what people earn.
+          </p>
+          <p>
+            If rent grows faster than prices year after year, this climbs and renting looks worse and worse. That's a
+            big hidden assumption, so it's shown here.
+          </p>
+        </>
+      ),
+      sources: ["pipr", "ukhpi"],
     } satisfies TipContent,
 
     headline: {
