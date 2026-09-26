@@ -46,10 +46,11 @@ in the personal allowance taper zone (gross from £100,000 up to, but not includ
 Rent-a-Room scheme: the first £7,500 of gross annual receipts is tax-free. Receipts
 above that are taxed at the marginal rate (the "alternative method", no expenses).
 
-### `cgtOnGia(value, costBasis, cgtRatePct): number`
+### `cgtOnGia(value, costBasis, cgtRatePct, people = 1): number`
 Capital gains tax if a general investment account worth `value`, bought for
-`costBasis`, were sold in one tax year: `(gain − £3,000 annual exemption) × rate`,
-never negative.
+`costBasis`, were sold in one tax year: `(gain − £3,000 × people) × rate`, never
+negative. Each adult has their own £3,000 annual exemption, so a jointly held
+account shared by two people gets £6,000.
 
 ### `yearsToSave(target, annualSaving, returnPct, current = 0): number | null`
 Years until a pot reaches `target`. The pot starts at `current`. Each month it
@@ -59,13 +60,21 @@ there, and null if not reached within 100 years.
 
 ## 2. Rent vs buy projection: `src/lib/projection.ts`
 
-### Inputs (`Inputs`, defaults in `DEFAULTS`)
-| Field | Default | Meaning |
+### Inputs (`Inputs`)
+Two input sets are exported:
+- `USER_EXAMPLE`: the fixed worked example in the table below. **Tests use this**
+  so they don't break when real-world defaults are refreshed.
+- `DEFAULTS`: the page's starting values, taken from official statistics. They're
+  defined with their sources in `src/lib/defaults.ts` and can change whenever the
+  data is updated. Tests must not depend on their values.
+
+| Field | USER_EXAMPLE | Meaning |
 |---|---|---|
-| salary | 90,000 | gross £/yr |
-| livingCosts | 13,000 | non-housing spending £/yr |
+| earners | 1 | number of adults in the household, each earning `salary` (1 or 2) |
+| salary | 90,000 | gross £/yr per earner |
+| livingCosts | 13,000 | non-housing spending £/yr for the whole household |
 | wageGrowth | 3 | %/yr growth of the housing + investing budget |
-| incomeMultiple | 4.5 | lender's maximum loan as a multiple of salary |
+| incomeMultiple | 4.5 | lender's maximum loan as a multiple of household gross income |
 | price | 500,000 | property price |
 | deposit | 95,000 | |
 | firstTimeBuyer | true | stamp duty relief |
@@ -91,7 +100,7 @@ there, and null if not reached within 100 years.
 - `stampDuty = stampDuty(price, firstTimeBuyer)`
 - `fees = purchaseFees`
 - `cashNeeded = deposit + stampDuty + fees`
-- `maxLoan = salary × incomeMultiple`
+- `maxLoan = salary × earners × incomeMultiple`
 - `loanToValue = loan / price × 100`
 
 ### `project(inputs)`: the simulation
@@ -104,12 +113,14 @@ spent that cash, owns the property worth `price`, owes `loan`, and has an empty
 portfolio.
 
 **Annual amounts for year `y`.** These step up once a year, not monthly.
-- Budget: `(takeHomePay(salary) − livingCosts) × (1 + wageGrowth)^y`, spread
+- Budget: `(earners × takeHomePay(salary) − livingCosts) × (1 + wageGrowth)^y`, spread
   evenly over 12 months.
 - Rent per month: `rent × (1 + rentGrowth)^y`.
 - Lodger income per month: `lodgerRent × (1 + rentGrowth)^y`, minus Rent-a-Room
   tax on 12 × that amount at `marginalTaxRate(salary)`, spread evenly. The
   marginal rate is taken from the starting salary and doesn't change with pay growth.
+  The £7,500 Rent-a-Room allowance is per home: joint owners share it, so the
+  total tax-free amount stays £7,500 whatever `earners` is.
 - Service charge per month: `serviceCharge × (1 + inflation)^y / 12`.
 
 **Each month, in this order.**
@@ -124,7 +135,7 @@ portfolio.
 3. Cash flows (signed): renter gets `budget − rent`; buyer gets
    `budget − buyer's housing cost`.
    - Positive: first repay any shortfall (see below). The rest goes into the ISA
-     up to the remaining allowance for that year (£20,000, reset at the start of
+     up to the remaining allowance for that year (£20,000 × `earners`, reset at the start of
      each projection year), then into a general investment account (GIA). With
      `useIsa = false` everything is treated as tax-free.
    - Negative: sell GIA holdings first (cost basis reduced in proportion), then
@@ -138,7 +149,7 @@ property value before that month's growth.
 
 **Details of the investment rules.**
 - The renter's opening ISA balance was saved in earlier years. It doesn't use
-  any of year 0's £20,000 allowance.
+  any of year 0's ISA allowance.
 - Withdrawing from the ISA doesn't give back allowance. Money used to repay a
   shortfall isn't an ISA contribution.
 - Selling GIA holdings to cover a negative flow doesn't trigger CGT at that
@@ -149,7 +160,8 @@ property value before that month's growth.
 
 **Rows.** `rows[0]` is completion day and `rows[n]` is the end of year `n`, so
 there are `years + 1` rows. Each row has:
-- `renterPortfolio` = ISA + GIA − CGT on the GIA (`cgtOnGia`) − shortfall;
+- `renterPortfolio` = ISA + GIA − CGT on the GIA (`cgtOnGia` with
+  `people = earners`) − shortfall;
   `renterNetWorth` = `renterPortfolio`.
 - `propertyValue`, `mortgageBalance`, and
   `equity = propertyValue × (1 − sellingCostPct/100) − mortgageBalance` (can be
@@ -164,7 +176,7 @@ there are `years + 1` rows. Each row has:
   today's money.
 
 **Other outputs.** `upfront`, `monthlyMortgage` (the repayment payment, or
-`loan × rate/12` for interest-only), `takeHome`, `marginalRate`, and
+`loan × rate/12` for interest-only), `takeHome` (household: `earners × takeHomePay(salary)`), `marginalRate`, and
 `renterRanDryYear` / `buyerRanDryYear`: the first year (1-based) that ended with
 a shortfall, else null. `totals` has lifetime sums of rent, interest, capital
 repaid, running costs and net lodger income, plus `purchaseCosts` (stamp duty +
@@ -193,3 +205,10 @@ Always looks at year one, whatever `years` is set to. Year-one money that neithe
 - `opportunityCost = cashNeeded × stockReturn/100`.
 - `expectedGrowth = price × houseGrowth/100`.
 - `buyTotal = interest + runningCosts − lodgerIncome + opportunityCost − expectedGrowth`.
+
+## 3. Default deposit: `src/lib/defaults.ts`
+
+### `minimumDeposit(price, maxLoan, minPct = 10): number`
+The smallest deposit a lender would accept. It must cover whatever the lender's
+income cap won't lend (`price − maxLoan`) and be at least `minPct`% of the price.
+The result is rounded **up** to the next £1,000. Never more than the price.

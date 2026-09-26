@@ -12,7 +12,8 @@ export type MortgageType = "repayment" | "interestOnly";
 
 export interface Inputs {
   // You
-  salary: number; // gross £/yr
+  earners: number; // adults in the household, each earning `salary`
+  salary: number; // gross £/yr per earner
   livingCosts: number; // non-housing spending £/yr (food, travel, fun…)
   wageGrowth: number; // %/yr
   incomeMultiple: number; // lender's loan-to-income cap
@@ -42,7 +43,9 @@ export interface Inputs {
   years: number;
 }
 
-export const DEFAULTS: Inputs = {
+/** The fixed worked example from docs/model-spec.md. Tests use this, not DEFAULTS. */
+export const USER_EXAMPLE: Inputs = {
+  earners: 1,
   salary: 90_000,
   livingCosts: 13_000,
   wageGrowth: 3,
@@ -67,6 +70,8 @@ export const DEFAULTS: Inputs = {
   cgtRate: 24,
   years: 30,
 };
+
+export const DEFAULTS: Inputs = USER_EXAMPLE;
 
 /** An investment portfolio split between an ISA and a taxable account. */
 interface Pot {

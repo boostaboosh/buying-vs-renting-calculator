@@ -678,3 +678,140 @@ table {
     animation: none !important;
   }
 }
+
+/* Explanations on hover, focus or tap */
+.tip-trigger {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-align: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--ink-3);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.tip-trigger:hover,
+.tip-trigger[aria-expanded="true"] {
+  text-decoration-style: solid;
+  text-decoration-color: var(--buy);
+}
+.tip-trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.tip-pop {
+  position: fixed;
+  z-index: 50;
+  width: min(340px, calc(100vw - 24px));
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.18);
+  font: 400 13.5px/1.5 var(--body);
+  text-align: left;
+  display: grid;
+  gap: 6px;
+}
+.tip-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.tip-body {
+  color: var(--ink-2);
+  display: grid;
+  gap: 6px;
+}
+.tip-body p {
+  margin: 0;
+}
+.tip-body .calc {
+  font: 12.5px/1.5 var(--mono);
+  color: var(--ink);
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+.tip-sources {
+  margin: 2px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.tip-sources a {
+  color: var(--buy);
+}
+
+.presets-stack {
+  display: grid;
+  gap: 6px;
+}
+.presets-stack button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.35;
+}
+.presets-stack button span {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.presets-stack button.on {
+  border-color: var(--buy);
+  box-shadow: inset 0 0 0 1px var(--buy);
+  background: var(--surface);
+}
+.chip-tip {
+  text-decoration: none;
+}
+.chip {
+  display: inline-block;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 13px/1 var(--body);
+  padding: 8px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.chip:hover {
+  border-color: var(--ink-3);
+}
+.kpi-value.tip-trigger,
+.headline .tip-trigger {
+  justify-self: start;
+}
+.facts dd .tip-trigger {
+  font: inherit;
+}
+.source-list {
+  list-style: none;
+  padding-left: 0 !important;
+}
+.source-list li {
+  display: grid;
+  gap: 2px;
+}
+.source-list a {
+  color: var(--buy);
+  font-weight: 500;
+}
+.source-list span {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.flows {
+  min-width: 480px;
+}

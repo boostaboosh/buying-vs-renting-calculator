@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { remainingBalance } from "./finance";
 import {
-  DEFAULTS,
+  USER_EXAMPLE,
   type Inputs,
   breakevenHouseGrowth,
   project,
@@ -10,7 +10,7 @@ import {
   yearOneCosts,
 } from "./projection";
 
-const base: Inputs = { ...DEFAULTS };
+const base: Inputs = { ...USER_EXAMPLE };
 
 describe("upfrontCosts", () => {
   it("works out the user's example: £500k flat, £95k deposit, £90k salary", () => {
