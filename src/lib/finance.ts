@@ -102,6 +102,11 @@ export function cgtOnGia(value: number, costBasis: number, cgtRatePct: number, p
   return gain > 0 ? gain * (cgtRatePct / 100) : 0;
 }
 
+/** A return above inflation converted to a nominal one, in %. */
+export function nominalRate(realPct: number, inflationPct: number): number {
+  return ((1 + realPct / 100) * (1 + inflationPct / 100) - 1) * 100;
+}
+
 /**
  * Years needed to save `target`, contributing `annualSaving` monthly into a pot
  * growing at `returnPct`, starting from `current`. Returns null if never reached.

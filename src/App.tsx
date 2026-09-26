@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { Field, Segmented, Toggle } from "./components/Field";
-import { Legend, TwoLineChart, type SeriesPoint } from "./components/Charts";
+import { GapChart, Legend, TwoLineChart, type GapPoint, type SeriesPoint } from "./components/Charts";
 import { Tip, type TipContent } from "./components/Tip";
-import { yearsToSave } from "./lib/finance";
+import { nominalRate, yearsToSave } from "./lib/finance";
 import {
   type Inputs,
   type MortgageType,
   breakevenHouseGrowth,
-  compoundingOvertakesYear,
+  leverageRace,
   project,
   summarise,
   yearOneCosts,
@@ -21,6 +21,49 @@ import { gbp, gbpShort, pct } from "./format";
 const RATES = [3, 3.5, 4, 4.5, 5, 5.5, 6];
 const GROWTHS = [0, 1, 2, 3, 4, 5];
 const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
+
+interface Scenario {
+  label: string;
+  /** Yearly growth above inflation, %. */
+  real: number;
+  why: string;
+  sources: SourceId[];
+}
+const HOUSE_SCENARIOS: Scenario[] = [
+  {
+    label: "London flats' last 5 years",
+    real: -4.9,
+    why: "London flats fell 4.9% a year after inflation over the last 5 years (Land Registry data via Housemetric). This row assumes that carries on.",
+    sources: ["housemetric"],
+  },
+  {
+    label: "London flats' last 20 years",
+    real: 0.1,
+    why: "London flats rose 0.1% a year after inflation over 20 years: about flat in real terms (Land Registry data via Housemetric).",
+    sources: ["housemetric"],
+  },
+  {
+    label: "Prices keep up with pay",
+    real: 1.4,
+    why: "Prices rise with pay, about 1.4% a year above inflation, the OBR's long-run productivity growth.",
+    sources: ["obr"],
+  },
+];
+const STOCK_SCENARIOS: Scenario[] = [
+  {
+    label: "World shares this century",
+    real: 3.5,
+    why: "World shares returned 3.5% a year after inflation from 2000 to 2024 (UBS Global Investment Returns Yearbook). About 0.2% is taken off for fund fees.",
+    sources: ["giry"],
+  },
+  {
+    label: "World shares since 1900",
+    real: 5.2,
+    why: "World shares returned 5.2% a year after inflation from 1900 to 2024 (UBS Global Investment Returns Yearbook). About 0.2% is taken off for fund fees.",
+    sources: ["giry"],
+  },
+];
+const FUND_FEES = 0.2;
 
 function formatInput(k: keyof Inputs, v: Inputs[keyof Inputs]): string {
   if (typeof v === "boolean") return v ? "on" : "off";
@@ -37,6 +80,7 @@ export default function App() {
   const preset: Preset = PRESETS[presetId];
   const [p, setP] = useState<Inputs>(preset.inputs);
   const [real, setReal] = useState(true);
+  const [view, setView] = useState<"gap" | "both">("gap");
   const set =
     <K extends keyof Inputs>(k: K) =>
     (v: Inputs[K]) =>
@@ -53,12 +97,31 @@ export default function App() {
   const grid = useMemo(
     () =>
       RATES.map((rate) =>
-        GROWTHS.map((g) => summarise(project({ ...p, mortgageRate: rate, houseGrowth: g }), true).difference),
+        GROWTHS.map(
+          (g) =>
+            // Rent moves with house prices, keeping the gap you set, as in the break-even figure.
+            summarise(
+              project({ ...p, mortgageRate: rate, followOnRate: rate, houseGrowth: g, rentGrowth: p.rentGrowth + (g - p.houseGrowth) }),
+              true,
+            ).difference,
+        ),
       ),
     [p],
   );
-  const overtake = compoundingOvertakesYear(proj);
-  const ex = explain({ p, proj, summary, real, breakeven, y1, overtake });
+  const race = useMemo(() => leverageRace(p), [p]);
+  const scenarios = useMemo(
+    () =>
+      HOUSE_SCENARIOS.map((h) =>
+        STOCK_SCENARIOS.map((sc) => {
+          const houseGrowth = nominalRate(h.real, p.inflation);
+          const stockReturn = nominalRate(sc.real, p.inflation) - FUND_FEES;
+          const rentGrowth = p.rentGrowth + (houseGrowth - p.houseGrowth);
+          return summarise(project({ ...p, houseGrowth, rentGrowth, stockReturn }), true).difference;
+        }),
+      ),
+    [p],
+  );
+  const ex = explain({ p, proj, summary, real, breakeven, y1, race });
 
   /** The explanation for an input: what it is, its default here, and why. */
   const fieldTip = (k: keyof Inputs, title: string): TipContent => {
@@ -90,12 +153,13 @@ export default function App() {
     buy: deflate(r.buyerNetWorth, r.year),
     rent: deflate(r.renterNetWorth, r.year),
   }));
-  const race: SeriesPoint[] = rows.slice(1).map((r) => ({
+  const gapData: GapPoint[] = rows.map((r) => ({ year: r.year, gap: deflate(r.buyerNetWorth - r.renterNetWorth, r.year) }));
+  const raceData: SeriesPoint[] = race.rows.map((r) => ({
     year: r.year,
-    buy: deflate(r.houseGain, r.year),
-    rent: deflate(r.renterInvestmentGain, r.year),
+    buy: deflate(r.homeGain, r.year),
+    rent: deflate(r.cashGain, r.year),
   }));
-  const raceNames = { buy: "Home's price gain", rent: "Renter's investment returns" };
+  const raceNames = { buy: "Home's price gain", rent: "Same cash invested instead" };
   const housingCost: SeriesPoint[] = rows.slice(1).map((r) => ({
     year: r.year,
     buy: deflate(r.mortgagePaid + r.runningCosts - r.lodgerIncome, r.year),
@@ -311,77 +375,164 @@ export default function App() {
               </ul>
             )}
           </section>
-
           <section className="card">
             <div className="card-head">
-              <h2>Net worth over time</h2>
-              <Legend />
+              <h2>Who's ahead, and by how much</h2>
+              <Segmented<"gap" | "both">
+                label="Chart"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "gap", label: "The gap" },
+                  { value: "both", label: "Both net worths" },
+                ]}
+              />
             </div>
-            <p className="sub">
-              Buyer: home value minus mortgage and selling costs, plus investments. Renter: investments. Both after tax,{" "}
-              {money}.
+            {view === "gap" ? (
+              <>
+                <p className="sub">
+                  Buyer's net worth minus renter's, {money}. Above the line (blue), buying is ahead. Below it (orange),
+                  renting is.
+                </p>
+                <GapChart
+                  data={gapData}
+                  ariaLabel={`Gap between buyer and renter over ${p.years} years. ${buyWins ? "Buying" : "Renting"} ends ${gbp(Math.abs(summary.difference))} ahead.`}
+                />
+              </>
+            ) : (
+              <>
+                <p className="sub">
+                  Buyer: home value minus mortgage and selling costs, plus investments. Renter: investments. Both after
+                  tax, {money}.
+                </p>
+                <Legend />
+                <TwoLineChart
+                  data={wealth}
+                  crossover={summary.crossoverYear}
+                  ariaLabel={`Net worth over ${p.years} years. Buyer ends at ${gbp(summary.finalBuyer)}, renter at ${gbp(summary.finalRenter)}.`}
+                />
+              </>
+            )}
+            <p className="note">
+              Renting starts ahead: on day one the buyer loses{" "}
+              <Tip tip={ex.y1Transaction}>{gbp(upfront.stampDuty + upfront.fees + (p.price * p.sellingCostPct) / 100)}</Tip>{" "}
+              to stamp duty, fees and the cost of selling.{" "}
+              {summary.crossoverYear
+                ? `Buying catches up in year ${summary.crossoverYear}${buyWins ? " and stays ahead" : ", but renting finishes ahead"}.`
+                : `Buying doesn't catch up within ${p.years} years.`}{" "}
+              The three charts below show why.
             </p>
-            <TwoLineChart
-              data={wealth}
-              crossover={summary.crossoverYear}
-              ariaLabel={`Net worth over ${p.years} years. Buyer ends at ${gbp(summary.finalBuyer)}, renter at ${gbp(summary.finalRenter)}.`}
-            />
           </section>
-
+          <h2 className="group-title">What drives the result</h2>
           <section className="card">
             <div className="card-head">
               <h2>Leverage vs compounding</h2>
               <Legend names={raceNames} />
             </div>
             <p className="sub">
-              The home grows at a lower rate on a bigger sum: {pct(p.houseGrowth)} a year on {gbp(p.price)}, bought with{" "}
-              {gbp(p.deposit)} of your own money. The renter's investments grow at a higher rate on a smaller sum that
-              keeps getting bigger. Each line is the money gained that year, {money}.
+              The buyer's {gbp(upfront.cashNeeded)} controls a {gbp(p.price)} home, so price growth of {pct(p.houseGrowth)}{" "}
+              a year works on the whole price. Invested instead, the same cash would grow faster ({pct(p.stockReturn)} a
+              year) but on a smaller sum. Both compound. Each line is what that year adds, {money}.
             </p>
             <TwoLineChart
-              data={race}
+              data={raceData}
               height={240}
               names={raceNames}
-              marker={overtake ? { x: overtake, label: `Compounding overtakes from year ${overtake}` } : null}
-              ariaLabel="Yearly gain from the home's price against the renter's investment returns"
-              footer={(r) => `${r.rent >= r.buy ? "Renter's investments" : "The home"} gained ${gbp(Math.abs(r.rent - r.buy))} more`}
+              marker={race.overtakeYear ? { x: race.overtakeYear, label: `Compounding overtakes in year ${race.overtakeYear}` } : null}
+              ariaLabel="Yearly gain from the home's price against the same cash invested in shares"
+              footer={(r) => `${r.rent >= r.buy ? "The invested cash" : "The home"} adds ${gbp(Math.abs(r.rent - r.buy))} more`}
             />
             <dl className="facts">
               <div>
                 <dt>Home's gain, year 1</dt>
-                <dd><Tip tip={ex.raceHome}>{gbp(rows[1].houseGain)}</Tip></dd>
+                <dd><Tip tip={ex.raceHome}>{gbp(race.rows[0]?.homeGain ?? 0)}</Tip></dd>
               </div>
               <div>
-                <dt>On your deposit, that's</dt>
-                <dd><Tip tip={ex.raceHome}>{pct((rows[1].houseGain / Math.max(1, p.deposit)) * 100)}</Tip></dd>
+                <dt>As a return on your cash</dt>
+                <dd><Tip tip={ex.raceHome}>{pct(((race.rows[0]?.homeGain ?? 0) / Math.max(1, upfront.cashNeeded)) * 100)}</Tip></dd>
               </div>
               <div>
-                <dt>Renter's returns, year 1</dt>
-                <dd><Tip tip={ex.raceRenter}>{gbp(rows[1].renterInvestmentGain)}</Tip></dd>
+                <dt>Cash invested instead, year 1</dt>
+                <dd><Tip tip={ex.raceCash}>{gbp(race.rows[0]?.cashGain ?? 0)}</Tip></dd>
               </div>
               <div>
                 <dt>Compounding overtakes</dt>
-                <dd><Tip tip={ex.raceOvertake}>{overtake ? `Year ${overtake}` : "Not yet"}</Tip></dd>
+                <dd><Tip tip={ex.raceOvertake}>{race.overtakeYear ? `Year ${race.overtakeYear}` : "Not within " + p.years + " years"}</Tip></dd>
               </div>
             </dl>
+            {real && Math.abs(p.houseGrowth - p.inflation) < 0.5 && (
+              <p className="note">
+                The home's line is almost flat because it grows at about the rate of inflation. It does compound in
+                pounds, but not in what those pounds buy. Switch to future pounds at the top to see both lines rise.
+              </p>
+            )}
             <p className="note">
-              This chart isn't the whole race. The buyer invests too: by year {p.years} their own investments earn{" "}
-              <Tip tip={{
-                title: `Buyer's investment returns, year ${p.years}`,
-                body: <p>What the buyer's own investments earned in the final year, before tax, {money}. The buyer invests whatever the mortgage and running costs leave, and more once the loan is paid off.</p>,
-              }}>{gbp(deflate(lastRow.buyerInvestmentGain, p.years))}</Tip>{" "}
-              a year, against the renter's {gbp(deflate(lastRow.renterInvestmentGain, p.years))}. Paying off the loan is
-              saving, and the mortgage doesn't rise with inflation the way rent does. The net worth chart adds it all up.
-            </p>
-            <p className="note">
-              Leverage isn't free: the buyer pays <Tip tip={ex.y1Interest}>{gbp(y1.interest)}</Tip> of interest in year one
-              for it, and that's counted in the net worth above. It also works in reverse: a 10% fall in price would
-              take {gbp(p.price * 0.1)} off a {gbp(p.deposit)} deposit. These are steady averages. In reality shares swing
-              more from year to year, but they're spread across thousands of companies, while a home is one asset in one
-              place and the mortgage magnifies its ups and downs on your money.
+              This chart shows one force on its own. Leverage costs interest (<Tip tip={ex.y1Interest}>{gbp(y1.interest)}</Tip>{" "}
+              in year one), and it works both ways: a 10% fall in price takes {gbp(p.price * 0.1)} off the buyer's{" "}
+              {gbp(p.deposit)} deposit. Rent against owning costs is the next chart.
             </p>
           </section>
-
+          <section className="card">
+            <div className="card-head">
+              <h2>Rent vs owning costs, each year</h2>
+              <Legend />
+            </div>
+            <p className="sub">
+              Rent rises every year. The mortgage payment only changes when you remortgage, and it stops once the loan
+              is paid off.
+              Owning includes service charge and maintenance, less lodger income. Each household invests whatever its
+              housing leaves of the same money for housing and investing. {real ? "In today's money." : "In future pounds."}
+            </p>
+            <p className="note">
+              A year's rent is <Tip tip={ex.rentYield}>{pct((rows[1].rentPaid / p.price) * 100)}</Tip> of the home's value
+              today and <Tip tip={ex.rentYield}>{pct((lastRow.rentPaid / rows[p.years - 1].propertyValue) * 100)}</Tip> in
+              year {p.years}.{" "}
+              {Math.abs(p.rentGrowth - p.houseGrowth) >= 0.5 &&
+                `Rent is set to grow ${p.rentGrowth > p.houseGrowth ? "faster" : "slower"} than prices, which ${p.rentGrowth > p.houseGrowth ? "favours buying" : "favours renting"} more each year.`}
+            </p>
+            <TwoLineChart
+              data={housingCost}
+              height={240}
+              ariaLabel="Yearly housing cost of renting versus owning"
+              footer={(r) => `${r.rent >= r.buy ? "Owning" : "Renting"} is ${gbp(Math.abs(r.rent - r.buy))} cheaper`}
+            />
+            <div className="scroll">
+              <table className="flows">
+                <thead>
+                  <tr>
+                    <th scope="col">Year</th>
+                    <th scope="col">
+                      <Tip tip={ex.budget(1)}>Money for housing and investing</Tip>
+                    </th>
+                    <th scope="col"><span className="key key-rent" /> Renter</th>
+                    <th scope="col"><span className="key key-buy" /> Buyer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flowYears.map((y) => {
+                    const r = rows[y];
+                    const buyCost = r.mortgagePaid + r.runningCosts - r.lodgerIncome;
+                    return (
+                      <tr key={y}>
+                        <th scope="row">{y}</th>
+                        <td><Tip tip={ex.budget(y)}>{gbp(deflate(r.budget, y))}</Tip></td>
+                        <td>
+                          <Tip tip={ex.housingCost(y, "rent")}>{gbp(deflate(r.rentPaid, y))}</Tip> on rent
+                          <br />
+                          <Tip tip={ex.invested(y, "rent")} className={r.renterInvested < 0 ? "neg" : ""}>{gbp(deflate(r.renterInvested, y))}</Tip> invested
+                        </td>
+                        <td>
+                          <Tip tip={ex.housingCost(y, "buy")}>{gbp(deflate(buyCost, y))}</Tip> on housing
+                          <br />
+                          <Tip tip={ex.invested(y, "buy")} className={r.buyerInvested < 0 ? "neg" : ""}>{gbp(deflate(r.buyerInvested, y))}</Tip> invested
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
           <section className="card">
             <h2>The sum most people stop at</h2>
             <p className="sub">
@@ -428,89 +579,87 @@ export default function App() {
               of year one's payments reduce the loan and stay yours.
             </p>
           </section>
-
-          <section className="card">
-            <div className="card-head">
-              <h2>Housing cost each year</h2>
-              <Legend />
-            </div>
+          <h2 className="group-title">Risk, and how sure can we be?</h2>
+          <section className="card prose">
+            <h2>One home vs the whole market</h2>
+            <ul>
+              <li>
+                <strong>Diversification.</strong> A global index tracker owns small slices of thousands of large companies,
+                across dozens of countries and every part of the economy. A home is one building, on one street, in one
+                city. If that area does badly, all your eggs are in it.
+              </li>
+              <li>
+                <strong>Leverage cuts both ways.</strong> The mortgage multiplies gains and losses on your own money. A 10%
+                fall in the home's price loses {gbp(p.price * 0.1)}, which is{" "}
+                {pct(((p.price * 0.1) / Math.max(1, p.deposit)) * 100, 0)} of the deposit. A 10% fall in shares loses 10%.
+              </li>
+              <li>
+                <strong>Volatility.</strong> Share prices jump around much more from year to year than house prices, and
+                big falls happen. You have to be able to sit through them without selling.
+              </li>
+              <li>
+                <strong>Selling.</strong> You can sell part of a fund in days for almost nothing. A home is sold whole,
+                takes months, and costs about {pct(p.sellingCostPct, 0)} of the price, plus stamp duty on the next one.
+              </li>
+              <li>
+                <strong>What the numbers leave out.</strong> Owning means security, no landlord and freedom to change
+                the place. Renting means flexibility to move, but also rent rises and the risk of being asked to leave.
+              </li>
+            </ul>
+            <h3>What history says</h3>
             <p className="sub">
-              Rent rises every year. The mortgage payment only changes when you remortgage, and it stops once the loan
-              is paid off.
-              Owning includes service charge and maintenance, less lodger income. Each household invests whatever its
-              housing leaves of the same money for housing and investing. {real ? "In today's money." : "In future pounds."}
+              Buyer minus renter after {p.years} years in today's money if past returns repeated. The scenarios replace
+              your house growth and investment return with real figures from the record; rent moves with house prices.
+              Everything else is as you set it.
             </p>
-            <TwoLineChart
-              data={housingCost}
-              height={240}
-              ariaLabel="Yearly housing cost of renting versus owning"
-              footer={(r) => `${r.rent >= r.buy ? "Owning" : "Renting"} is ${gbp(Math.abs(r.rent - r.buy))} cheaper`}
-            />
             <div className="scroll">
-              <table className="flows">
+              <table className="grid">
                 <thead>
                   <tr>
-                    <th scope="col">Year</th>
-                    <th scope="col">
-                      <Tip tip={ex.budget(1)}>Money for housing and investing</Tip>
-                    </th>
-                    <th scope="col"><span className="key key-rent" /> Renter</th>
-                    <th scope="col"><span className="key key-buy" /> Buyer</th>
+                    <th scope="col" className="corner">House prices ↓ · shares →</th>
+                    {STOCK_SCENARIOS.map((sc) => (
+                      <th scope="col" key={sc.label}>
+                        <Tip tip={{ title: sc.label, body: <p>{sc.why}</p>, sources: sc.sources }}>{sc.label}</Tip>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {flowYears.map((y) => {
-                    const r = rows[y];
-                    const buyCost = r.mortgagePaid + r.runningCosts - r.lodgerIncome;
-                    return (
-                      <tr key={y}>
-                        <th scope="row">{y}</th>
-                        <td><Tip tip={ex.budget(y)}>{gbp(deflate(r.budget, y))}</Tip></td>
-                        <td>
-                          <Tip tip={ex.housingCost(y, "rent")}>{gbp(deflate(r.rentPaid, y))}</Tip> on rent
-                          <br />
-                          <Tip tip={ex.invested(y, "rent")} className={r.renterInvested < 0 ? "neg" : ""}>{gbp(deflate(r.renterInvested, y))}</Tip> invested
-                        </td>
-                        <td>
-                          <Tip tip={ex.housingCost(y, "buy")}>{gbp(deflate(buyCost, y))}</Tip> on housing
-                          <br />
-                          <Tip tip={ex.invested(y, "buy")} className={r.buyerInvested < 0 ? "neg" : ""}>{gbp(deflate(r.buyerInvested, y))}</Tip> invested
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {HOUSE_SCENARIOS.map((h, i) => (
+                    <tr key={h.label}>
+                      <th scope="row" className="scenario-row">
+                        <Tip tip={{ title: h.label, body: <p>{h.why}</p>, sources: h.sources }}>{h.label}</Tip>
+                      </th>
+                      {scenarios[i].map((d, j) => {
+                        const strength = Math.min(1, Math.abs(d) / 750_000);
+                        return (
+                          <td
+                            key={j}
+                            style={{
+                              background: `color-mix(in oklab, var(${d >= 0 ? "--buy" : "--rent"}) ${Math.round(8 + strength * 42)}%, var(--surface))`,
+                            }}
+                          >
+                            <span className="grid-who">{d >= 0 ? "Buy" : "Rent"}</span> +{gbpShort(Math.abs(d))}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          </section>
-
-          <section className="card">
-            <h2>Getting to completion day</h2>
-            <dl className="facts">
-              <div><dt>Deposit</dt><dd><Tip tip={ex.deposit}>{gbp(p.deposit)}</Tip></dd></div>
-              <div><dt>Stamp duty{ftb ? " (first-time buyer)" : ""}</dt><dd><Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip></dd></div>
-              <div><dt>Fees</dt><dd><Tip tip={ex.fees}>{gbp(upfront.fees)}</Tip></dd></div>
-              <div className="total"><dt>Cash needed</dt><dd><Tip tip={ex.cashNeeded}>{gbp(upfront.cashNeeded)}</Tip></dd></div>
-            </dl>
             <p className="note">
-              {renterSaving0 > 0 && saveYears != null ? (
-                <>
-                  While renting at {gbp(p.rent)} a month you can save <Tip tip={ex.savingRate}>{gbp(renterSaving0)}</Tip> a
-                  year, so this takes about <Tip tip={ex.yearsToSave}><strong>{saveYears.toFixed(1)} years</strong></Tip>.{" "}
-                </>
-              ) : (
-                <>At this rent you can't save anything towards a deposit. </>
-              )}
-              Both households are identical until then, so the comparison starts on completion day. The renter keeps the
-              same {gbp(upfront.cashNeeded)} invested.
+              Your inputs assume house prices grow {pct(p.houseGrowth)} a year ({pct(((1 + p.houseGrowth / 100) / (1 + p.inflation / 100) - 1) * 100)}{" "}
+              after inflation) and investments return {pct(p.stockReturn)} ({pct(((1 + p.stockReturn / 100) / (1 + p.inflation / 100) - 1) * 100)}{" "}
+              after inflation).
             </p>
           </section>
-
           <section className="card">
             <h2>What if the rate or house prices differ?</h2>
             <p className="sub">
-              Buyer minus renter after {p.years} years, in today's money, keeping all your other inputs. Blue means
-              buying wins; orange means renting wins. Your current inputs are outlined.
+              Buyer minus renter after {p.years} years, in today's money. The mortgage rate applies for the whole term,
+              and rent moves with house prices. Everything else is as you set it. Blue means buying wins; orange means
+              renting wins. Your current inputs are outlined.
             </p>
             <div className="scroll">
               <table className="grid">
@@ -528,7 +677,7 @@ export default function App() {
                       <th scope="row">{pct(rate, 1)}</th>
                       {grid[i].map((d, j) => {
                         const strength = Math.min(1, Math.abs(d) / 750_000);
-                        const isYou = rate === p.mortgageRate && GROWTHS[j] === p.houseGrowth;
+                        const isYou = rate === p.mortgageRate && rate === p.followOnRate && GROWTHS[j] === p.houseGrowth;
                         return (
                           <td
                             key={j}
@@ -559,7 +708,28 @@ export default function App() {
               </table>
             </div>
           </section>
-
+          <h2 className="group-title">The details</h2>
+          <section className="card">
+            <h2>Getting to completion day</h2>
+            <dl className="facts">
+              <div><dt>Deposit</dt><dd><Tip tip={ex.deposit}>{gbp(p.deposit)}</Tip></dd></div>
+              <div><dt>Stamp duty{ftb ? " (first-time buyer)" : ""}</dt><dd><Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip></dd></div>
+              <div><dt>Fees</dt><dd><Tip tip={ex.fees}>{gbp(upfront.fees)}</Tip></dd></div>
+              <div className="total"><dt>Cash needed</dt><dd><Tip tip={ex.cashNeeded}>{gbp(upfront.cashNeeded)}</Tip></dd></div>
+            </dl>
+            <p className="note">
+              {renterSaving0 > 0 && saveYears != null ? (
+                <>
+                  While renting at {gbp(p.rent)} a month you can save <Tip tip={ex.savingRate}>{gbp(renterSaving0)}</Tip> a
+                  year, so this takes about <Tip tip={ex.yearsToSave}><strong>{saveYears.toFixed(1)} years</strong></Tip>.{" "}
+                </>
+              ) : (
+                <>At this rent you can't save anything towards a deposit. </>
+              )}
+              Both households are identical until then, so the comparison starts on completion day. The renter keeps the
+              same {gbp(upfront.cashNeeded)} invested.
+            </p>
+          </section>
           <section className="card">
             <h2>Year by year</h2>
             <p className="sub">{real ? "In today's money." : "In future pounds."} Hover over a column heading for what it means.</p>
@@ -601,7 +771,6 @@ export default function App() {
               {gbp(totals.purchaseCosts)}; selling costs {gbp(totals.sellingCosts)}.
             </p>
           </section>
-
           <section className="card prose">
             <h2>How the comparison works</h2>
             <ul>
@@ -641,7 +810,6 @@ export default function App() {
               </li>
             </ul>
           </section>
-
           <section className="card prose" id="sources">
             <h2>Sources</h2>
             <p className="sub">

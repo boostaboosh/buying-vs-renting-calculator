@@ -390,6 +390,32 @@ export function summarise(proj: Projection, real = false): Summary {
   };
 }
 
+export interface LeverageRace {
+  rows: { year: number; homeGain: number; cashGain: number }[];
+  /** First year the invested cash adds at least as much as the home's price gain. */
+  overtakeYear: number | null;
+}
+
+/**
+ * Leverage against compounding, on their own: the home's price gain on the whole
+ * price vs what the buyer's own cash would earn invested instead, nothing added.
+ */
+export function leverageRace(p: Inputs): LeverageRace {
+  const cash = upfrontCosts(p).cashNeeded;
+  const h = 1 + p.houseGrowth / 100;
+  const s = 1 + p.stockReturn / 100;
+  const rows = [];
+  for (let t = 1; t <= p.years; t++) {
+    rows.push({
+      year: t,
+      homeGain: p.price * (Math.pow(h, t) - Math.pow(h, t - 1)),
+      cashGain: cash * (Math.pow(s, t) - Math.pow(s, t - 1)),
+    });
+  }
+  const overtake = rows.find((r) => r.cashGain >= r.homeGain);
+  return { rows, overtakeYear: overtake ? overtake.year : null };
+}
+
 /**
  * First year the renter's investment returns are at least the home's price gain:
  * where compounding on a smaller pot overtakes leverage on the whole price.

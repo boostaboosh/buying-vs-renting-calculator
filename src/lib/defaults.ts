@@ -195,8 +195,13 @@ export const PRESETS = {
       serviceCharge: LONDON_FLAT_SERVICE_CHARGE,
       maintenancePct: 0.5,
       houseGrowth: INFLATION,
+      rentGrowth: INFLATION,
     },
     {
+      rentGrowth: {
+        text: "Set to match house price growth (2%), so rent stays about the same share of the home's value, as it tends to over the long run. If rent grew faster than prices every year for 30 years, rent would climb from 5.1% to 7.4% of the home's value, which quietly favours buying. London rents rose 3.5% in the year to August 2026.",
+        sources: ["pipr", "housemetric"],
+      },
       houseGrowth: {
         text: "2% a year, the same as inflation, so prices stay flat in real terms. That's roughly what London flats have done over 20 years (0.1% a year above inflation, from Land Registry data). Over the last 5 years they fell 4.9% a year after inflation. Pay has grown faster than this, so there's a case for higher; the break-even figure shows how much it matters.",
         sources: ["housemetric", "ukhpi"],

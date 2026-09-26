@@ -18,9 +18,15 @@ It goes past the usual "rent £24k vs mortgage interest £12k" sum by including:
 - **Fixed mortgage vs rising rent.** The mortgage payment is set on day one; rent,
   service charges and maintenance rise every year.
 - **Leverage vs compounding.** The buyer gets house price growth on the whole
-  property, not just the deposit: a lower rate on a bigger sum. The renter gets
-  investment returns on a smaller pot that keeps growing and compounding. A chart
-  shows each year's gains side by side and the year compounding overtakes.
+  property, not just the deposit: a lower rate on a bigger sum. The same cash
+  invested instead gets a higher rate on a smaller sum. Both compound; a chart
+  shows each year's gain and the year compounding overtakes.
+- **Risk and history.** Diversification, leverage on the way down, volatility and
+  selling costs, plus a table of outcomes if past returns repeated (London flats
+  over 5 and 20 years; world shares this century and since 1900).
+- **Consistent growth assumptions.** Rent moves with house prices by default and
+  in every what-if, and the page shows rent as a share of the home's value at the
+  start and end so a hidden divergence can't tilt the result.
 - **UK tax.** Stamp duty (England, from April 2025, with first-time buyer relief),
   income tax and NI for take-home pay, ISA allowance with CGT on anything above it,
   CGT-free main home, Rent-a-Room relief for a lodger.
