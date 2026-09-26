@@ -13,11 +13,12 @@ export interface Context {
   real: boolean;
   breakeven: number | null;
   y1: UnrecoverableCosts;
+  overtake: number | null;
 }
 
 const money = (real: boolean) => (real ? "in today's money (adjusted for inflation)" : "in future pounds (not adjusted for inflation)");
 
-export function explain({ p, proj, summary, real, breakeven, y1 }: Context) {
+export function explain({ p, proj, summary, real, breakeven, y1, overtake }: Context) {
   const { upfront, rows } = proj;
   const last = rows[rows.length - 1];
   const d = real ? last.deflator : 1;
@@ -136,6 +137,61 @@ export function explain({ p, proj, summary, real, breakeven, y1 }: Context) {
     budget,
     housingCost,
     invested,
+
+    raceHome: {
+      title: "The home's price gain (leverage)",
+      body: (
+        <>
+          <p>
+            The rise in the home's value in year one. You get the growth on the whole price, but you only put in the
+            deposit. The bank's money works for you, at the cost of the interest.
+          </p>
+          <p className="calc">
+            {gbp(p.price)} × {pct(p.houseGrowth)} ≈ {gbp(rows[1].houseGain)}
+            <br />
+            {gbp(rows[1].houseGain)} ÷ {gbp(p.deposit)} deposit = {pct((rows[1].houseGain / Math.max(1, p.deposit)) * 100)}{" "}
+            return on your own money
+          </p>
+        </>
+      ),
+      sources: ["housemetric", "ukhpi"],
+    } satisfies TipContent,
+
+    raceRenter: {
+      title: "The renter's investment returns (compounding)",
+      body: (
+        <>
+          <p>
+            Growth on the renter's investments in year one, before tax. The pot starts with the{" "}
+            {gbp(upfront.cashNeeded)} the buyer spent, and grows as more is paid in and returns build on returns.
+          </p>
+          <p className="calc">
+            about {gbp(upfront.cashNeeded)} × {pct(p.stockReturn)}, plus growth on this year's payments in ={" "}
+            {gbp(rows[1].renterInvestmentGain)}
+          </p>
+        </>
+      ),
+      sources: ["giry"],
+    } satisfies TipContent,
+
+    raceOvertake: {
+      title: "When compounding overtakes leverage",
+      body: (
+        <>
+          <p>
+            The first year the renter's investments earn more than the home's price rises. From then on, the gap in
+            yearly growth favours renting and widens.
+          </p>
+          <p className="calc">
+            {overtake ? `Year ${overtake}` : `Not within ${p.years} years`}
+          </p>
+          <p>
+            This isn't when renting pulls ahead overall: the buyer also saves by paying off the loan and, over time,
+            by rent rising faster than the mortgage. The net worth chart shows the overall result.
+          </p>
+        </>
+      ),
+    } satisfies TipContent,
 
     headline: {
       title: `Difference after ${p.years} years`,

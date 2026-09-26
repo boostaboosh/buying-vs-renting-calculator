@@ -17,7 +17,10 @@ It goes past the usual "rent £24k vs mortgage interest £12k" sum by including:
   index fund. If housing costs more than the budget, investments are sold (signed flows).
 - **Fixed mortgage vs rising rent.** The mortgage payment is set on day one; rent,
   service charges and maintenance rise every year.
-- **Leverage.** The buyer gets house price growth on the whole property, not just the deposit.
+- **Leverage vs compounding.** The buyer gets house price growth on the whole
+  property, not just the deposit: a lower rate on a bigger sum. The renter gets
+  investment returns on a smaller pot that keeps growing and compounding. A chart
+  shows each year's gains side by side and the year compounding overtakes.
 - **UK tax.** Stamp duty (England, from April 2025, with first-time buyer relief),
   income tax and NI for take-home pay, ISA allowance with CGT on anything above it,
   CGT-free main home, Rent-a-Room relief for a lodger.
