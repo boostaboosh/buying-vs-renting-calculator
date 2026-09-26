@@ -81,6 +81,8 @@ export default function App() {
   const [p, setP] = useState<Inputs>(preset.inputs);
   const [real, setReal] = useState(true);
   const [view, setView] = useState<"gap" | "both">("gap");
+  // The race defaults to pounds at the time, so the home's compounding is visible even when it only matches inflation.
+  const [raceReal, setRaceReal] = useState(false);
   const set =
     <K extends keyof Inputs>(k: K) =>
     (v: Inputs[K]) =>
@@ -154,11 +156,15 @@ export default function App() {
     rent: deflate(r.renterNetWorth, r.year),
   }));
   const gapData: GapPoint[] = rows.map((r) => ({ year: r.year, gap: deflate(r.buyerNetWorth - r.renterNetWorth, r.year) }));
+  const raceDeflate = (n: number, year: number) => (raceReal ? n / rows[year].deflator : n);
   const raceData: SeriesPoint[] = race.rows.map((r) => ({
     year: r.year,
-    buy: deflate(r.homeGain, r.year),
-    rent: deflate(r.cashGain, r.year),
+    buy: raceDeflate(r.homeGain, r.year),
+    rent: raceDeflate(r.cashGain, r.year),
   }));
+  const raceFirst = race.rows[0];
+  const raceLast = race.rows[race.rows.length - 1];
+  const raceMoney = raceReal ? "in today's money" : "in pounds at the time (not adjusted for inflation)";
   const raceNames = { buy: "Home's price gain", rent: "Same cash invested instead" };
   const housingCost: SeriesPoint[] = rows.slice(1).map((r) => ({
     year: r.year,
@@ -427,13 +433,22 @@ export default function App() {
           <section className="card">
             <div className="card-head">
               <h2>Leverage vs compounding</h2>
-              <Legend names={raceNames} />
+              <Segmented<"nominal" | "real">
+                label="Show this chart"
+                value={raceReal ? "real" : "nominal"}
+                onChange={(v) => setRaceReal(v === "real")}
+                options={[
+                  { value: "nominal", label: "Pounds at the time" },
+                  { value: "real", label: "Today's money" },
+                ]}
+              />
             </div>
             <p className="sub">
               The buyer's {gbp(upfront.cashNeeded)} controls a {gbp(p.price)} home, so price growth of {pct(p.houseGrowth)}{" "}
               a year works on the whole price. Invested instead, the same cash would grow faster ({pct(p.stockReturn)} a
-              year) but on a smaller sum. Both compound. Each line is what that year adds, {money}.
+              year) but on a smaller sum. Both compound. Each line is what that year adds, {raceMoney}.
             </p>
+            <Legend names={raceNames} />
             <TwoLineChart
               data={raceData}
               height={240}
@@ -442,28 +457,64 @@ export default function App() {
               ariaLabel="Yearly gain from the home's price against the same cash invested in shares"
               footer={(r) => `${r.rent >= r.buy ? "The invested cash" : "The home"} adds ${gbp(Math.abs(r.rent - r.buy))} more`}
             />
-            <dl className="facts">
+            {raceFirst && raceLast && (
+            <dl className="facts facts-3">
               <div>
                 <dt>Home's gain, year 1</dt>
-                <dd><Tip tip={ex.raceHome}>{gbp(race.rows[0]?.homeGain ?? 0)}</Tip></dd>
+                <dd><Tip tip={ex.raceHome}>{gbp(raceDeflate(raceFirst.homeGain, 1))}</Tip></dd>
               </div>
               <div>
-                <dt>As a return on your cash</dt>
-                <dd><Tip tip={ex.raceHome}>{pct(((race.rows[0]?.homeGain ?? 0) / Math.max(1, upfront.cashNeeded)) * 100)}</Tip></dd>
+                <dt>Home's gain, year {raceLast.year}</dt>
+                <dd>
+                  <Tip tip={{
+                    title: `The home's price gain in year ${raceLast.year}`,
+                    body: (
+                      <>
+                        <p className="calc">
+                          {gbp(p.price)} × (1 + {pct(p.houseGrowth)})<sup>{raceLast.year - 1}</sup> × {pct(p.houseGrowth)} ={" "}
+                          {gbp(raceLast.homeGain)} in pounds at the time
+                          <br />= {gbp(raceLast.homeGain / rows[raceLast.year].deflator)} in today's money
+                        </p>
+                        <p>{pct(p.houseGrowth)} of a bigger value each year: it compounds, but slowly.</p>
+                      </>
+                    ),
+                  }}>{gbp(raceDeflate(raceLast.homeGain, raceLast.year))}</Tip>
+                </dd>
+              </div>
+              <div>
+                <dt>Year 1 gain on your cash</dt>
+                <dd><Tip tip={ex.raceHome}>{pct((raceFirst.homeGain / Math.max(1, upfront.cashNeeded)) * 100)}</Tip></dd>
               </div>
               <div>
                 <dt>Cash invested instead, year 1</dt>
-                <dd><Tip tip={ex.raceCash}>{gbp(race.rows[0]?.cashGain ?? 0)}</Tip></dd>
+                <dd><Tip tip={ex.raceCash}>{gbp(raceDeflate(raceFirst.cashGain, 1))}</Tip></dd>
+              </div>
+              <div>
+                <dt>Cash invested instead, year {raceLast.year}</dt>
+                <dd>
+                  <Tip tip={{
+                    title: `The invested cash's return in year ${raceLast.year}`,
+                    body: (
+                      <p className="calc">
+                        {gbp(upfront.cashNeeded)} × (1 + {pct(p.stockReturn)})<sup>{raceLast.year - 1}</sup> × {pct(p.stockReturn)} ={" "}
+                        {gbp(raceLast.cashGain)} in pounds at the time
+                        <br />= {gbp(raceLast.cashGain / rows[raceLast.year].deflator)} in today's money
+                      </p>
+                    ),
+                  }}>{gbp(raceDeflate(raceLast.cashGain, raceLast.year))}</Tip>
+                </dd>
               </div>
               <div>
                 <dt>Compounding overtakes</dt>
                 <dd><Tip tip={ex.raceOvertake}>{race.overtakeYear ? `Year ${race.overtakeYear}` : "Not within " + p.years + " years"}</Tip></dd>
               </div>
             </dl>
-            {real && Math.abs(p.houseGrowth - p.inflation) < 0.5 && (
+            )}
+            {Math.abs(p.houseGrowth - p.inflation) < 0.5 && (
               <p className="note">
-                The home's line is almost flat because it grows at about the rate of inflation. It does compound in
-                pounds, but not in what those pounds buy. Switch to future pounds at the top to see both lines rise.
+                {raceReal
+                  ? "The home's line is flat in today's money because it grows at about the rate of inflation. It compounds in pounds, but those pounds buy no more. Switch to pounds at the time to see it compound."
+                  : `The home grows at about the rate of inflation (${pct(p.inflation)}), so in today's money its yearly gain stays about the same. Only the part of a return above inflation makes you better off.`}
               </p>
             )}
             <p className="note">
