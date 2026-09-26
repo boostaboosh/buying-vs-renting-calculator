@@ -1,5 +1,10 @@
 # Rent or buy, over the long run
 
+**Use it:** https://boostaboosh.github.io/buying-vs-renting-calculator/
+
+Share that link with anyone. It's rebuilt and redeployed automatically each time
+`main` changes (see `.github/workflows/deploy.yml`).
+
 A UK calculator that answers one question: if two people earn and spend the same,
 and one buys a home while the other rents and invests the deposit, who is richer
 after 10, 30 or 50 years?
@@ -31,6 +36,26 @@ npm run test:run     # unit tests (Vitest)
 npm run build        # type-check + production build to dist/
 npm run build:single # one self-contained HTML file in dist-single/
 ```
+
+## Working on it: tests first
+
+The calculator's logic is specified in [`docs/model-spec.md`](docs/model-spec.md).
+Tests are written from that spec and from real-world rules (HMRC, GOV.UK, standard
+mortgage maths), never by copying what the code happens to output.
+
+To change behaviour:
+
+1. Update `docs/model-spec.md`.
+2. Write or change a test so it fails for the right reason.
+3. Change the code until it passes (`npm test` watches as you edit).
+
+Test files:
+
+- `src/lib/*.contract.test.ts`: written blind from the spec, without reading the implementation.
+- `src/lib/*.test.ts`: further examples and regression checks.
+
+If a test disagrees with the code, work out which one matches the spec and the
+real-world rule before touching either.
 
 ## Code
 
