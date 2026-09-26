@@ -34,9 +34,28 @@ jobs:
         with:
           path: dist
 
+  ui:
+    # Browser tests: behaviour checks gate the deploy. Pixel comparisons are skipped here
+    # because font rendering differs between machines; the screenshots are still saved in
+    # the report artifact so they can be looked at.
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.56.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npx playwright test --ignore-snapshots
+        env:
+          HOME: /root
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 14
+
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: test
+    needs: [test, ui]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

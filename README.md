@@ -62,6 +62,23 @@ npm run build        # type-check + production build to dist/
 npm run build:single # one self-contained HTML file in dist-single/
 ```
 
+## UI tests (screenshots)
+
+`npm run test:ui` opens the page in a real browser (Playwright) and:
+
+- checks behaviour: no errors, each chart opens in the intended view, the home's
+  gain compounds, rent rises in the costs chart, tooltips work, no sideways
+  scrolling on a phone
+- compares screenshots of each section, light and dark, plus a phone view, with
+  the reference images in `e2e/__screenshots__`
+
+If a screenshot differs, `npx playwright show-report` shows expected, actual and
+the difference. Fix the page, or if the new look is intended, run
+`npm run test:ui:update` and commit the new images. GitHub runs the behaviour
+checks on every push (pixel comparisons are skipped there because fonts render
+differently on other machines) and keeps the screenshots in the run's
+`playwright-report` artifact.
+
 ## Working on it: tests first
 
 The calculator's logic is specified in [`docs/model-spec.md`](docs/model-spec.md).
