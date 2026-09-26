@@ -117,6 +117,9 @@ export function TwoLineChart({
   const c = usePalette();
   const axis = { fill: c["--ink-3"], fontSize: 12, fontFamily: "var(--mono)" };
   const last = data.length - 1;
+  // Labels near the right-hand edge sit to the left of their line so they aren't cut off.
+  const lastYear = data[last]?.year ?? 0;
+  const labelSide = (x: number) => (x > lastYear * 0.6 ? "insideTopRight" : "insideTopLeft");
   const endDot =
     (color: string) =>
     ({ cx, cy, index }: { cx?: number; cy?: number; index?: number }) =>
@@ -149,7 +152,7 @@ export function TwoLineChart({
             <ReferenceLine
               x={marker.x}
               stroke={c["--ink-3"]}
-              label={{ value: marker.label, position: "insideTopLeft", fill: c["--ink-2"], fontSize: 12 }}
+              label={{ value: marker.label, position: labelSide(marker.x), fill: c["--ink-2"], fontSize: 12 }}
             />
           )}
           {crossover != null && crossover > 0 && (
@@ -157,7 +160,7 @@ export function TwoLineChart({
               x={crossover}
               stroke={c["--ink-3"]}
               strokeDasharray="0"
-              label={{ value: `Buying ahead from year ${crossover}`, position: "insideTopLeft", fill: c["--ink-2"], fontSize: 12 }}
+              label={{ value: `Buying ahead from year ${crossover}`, position: labelSide(crossover), fill: c["--ink-2"], fontSize: 12 }}
             />
           )}
           <Tooltip

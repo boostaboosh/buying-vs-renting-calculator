@@ -30,12 +30,21 @@ test("each chart opens in the view that makes its point", async ({ page }) => {
   }
 });
 
-test("the home's price gain visibly compounds by default", async ({ page }) => {
+test("the leverage race opens on running totals, which compound", async ({ page }) => {
   await openPage(page);
   const race = card(page, "Leverage vs compounding");
-  const first = money(await race.locator("dt:has-text(\"Home's gain, year 1\") + dd").innerText());
-  const last = money(await race.locator("dt:has-text(\"Home's gain, year 30\") + dd").innerText());
-  expect(last).toBeGreaterThan(first * 1.5);
+  await expect(race.getByRole("radio", { name: "Total so far" })).toHaveAttribute("aria-checked", "true");
+  const firstYear = money(await race.locator("dt:has-text(\"Home's gain, year 1\") + dd").innerText());
+  const total = money(await race.locator("dt:has-text(\"Home's total gain by year 30\") + dd").innerText());
+  // Compounding: 30 years of growth adds more than 30 × the first year's gain.
+  expect(total).toBeGreaterThan(firstYear * 30);
+});
+
+test("the race shows when yearly gains cross and when totals catch up", async ({ page }) => {
+  await openPage(page);
+  const race = card(page, "Leverage vs compounding");
+  await expect(race.locator("dt:has-text(\"Invested cash gains more each year\") + dd")).toContainText(/year|Not within/i);
+  await expect(race.locator("dt:has-text(\"Invested cash catches up in total\") + dd")).toContainText(/Year|Not within/);
 });
 
 test("rent rises and the mortgage stays put in the costs chart by default", async ({ page }) => {

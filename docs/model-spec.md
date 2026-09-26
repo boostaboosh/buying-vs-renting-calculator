@@ -226,9 +226,20 @@ have earned if invested instead, with nothing added. For each year `t` from 1 to
 - `cashGain = cashNeeded × ((1 + s)^t − (1 + s)^(t−1))`, where `cashNeeded` is
   from `upfrontCosts`
 
-Returns `{ rows: [{ year, homeGain, cashGain }], overtakeYear }`, where
-`overtakeYear` is the first `t` with `cashGain ≥ homeGain`, or null if that never
-happens within `years`. All figures are nominal.
+Each row also carries running totals since completion day:
+- `homeTotal = price × ((1 + h)^t − 1)`: everything the home's value has gained so far
+- `cashTotal = cashNeeded × ((1 + s)^t − 1)`: everything the invested cash has gained so far
+
+Returns `{ rows: [{ year, homeGain, cashGain, homeTotal, cashTotal }], overtakeYear,
+catchUpYear }`:
+- `overtakeYear`: the first `t` with `cashGain ≥ homeGain` (the invested cash is
+  now gaining more each year), or null if that never happens within `years`
+- `catchUpYear`: the first `t` with `cashTotal ≥ homeTotal` (the invested cash has
+  now gained as much in total), or null if that never happens within `years`.
+  This is never earlier than `overtakeYear`, since totals only cross after yearly
+  gains have.
+
+All figures are nominal.
 
 ### `breakevenHouseGrowth(inputs)`
 The `houseGrowth` at which the nominal `difference` at the horizon is 0. Rent

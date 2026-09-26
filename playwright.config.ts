@@ -8,9 +8,10 @@ export default defineConfig({
   fullyParallel: true,
   reporter: [["list"], ["html", { open: "never" }]],
   expect: {
-    // Tight on purpose: a 1% allowance once let a real change to a chart line pass.
-    // Rendering is deterministic on one machine; CI skips pixel comparisons (see workflow).
-    toHaveScreenshot: { maxDiffPixelRatio: 0.001, animations: "disabled" },
+    // Near-exact on purpose: ratio-based allowances let a recoloured chart line and a
+    // clipped label pass. Rendering is deterministic on one machine; CI skips pixel
+    // comparisons (see the workflow).
+    toHaveScreenshot: { maxDiffPixels: 10, animations: "disabled" },
   },
   use: {
     baseURL: "http://localhost:4173",

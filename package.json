@@ -12,7 +12,7 @@
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:ui": "playwright test",
-    "test:ui:update": "playwright test --update-snapshots"
+    "test:ui:update": "playwright test --update-snapshots=all"
   },
   "dependencies": {
     "@fontsource/bricolage-grotesque": "^5.3.0",
