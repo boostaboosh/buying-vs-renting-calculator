@@ -75,6 +75,24 @@ function formatInput(k: keyof Inputs, v: Inputs[keyof Inputs]): string {
   return pct(v, 2).replace(/\.?0+%$/, "%");
 }
 
+/**
+ * Per-chart choice of units. Charts of yearly amounts default to pounds at the
+ * time, because that's what shows rent rising and a fixed mortgage staying put.
+ */
+function MoneySwitch({ real, onChange }: { real: boolean; onChange: (real: boolean) => void }) {
+  return (
+    <Segmented<"nominal" | "real">
+      label="Show this chart"
+      value={real ? "real" : "nominal"}
+      onChange={(v) => onChange(v === "real")}
+      options={[
+        { value: "nominal", label: "Pounds at the time" },
+        { value: "real", label: "Today's money" },
+      ]}
+    />
+  );
+}
+
 export default function App() {
   const [presetId, setPresetId] = useState<PresetId>("london");
   const preset: Preset = PRESETS[presetId];
@@ -83,6 +101,7 @@ export default function App() {
   const [view, setView] = useState<"gap" | "both">("gap");
   // The race defaults to pounds at the time, so the home's compounding is visible even when it only matches inflation.
   const [raceReal, setRaceReal] = useState(false);
+  const [costReal, setCostReal] = useState(false);
   const set =
     <K extends keyof Inputs>(k: K) =>
     (v: Inputs[K]) =>
@@ -166,10 +185,11 @@ export default function App() {
   const raceLast = race.rows[race.rows.length - 1];
   const raceMoney = raceReal ? "in today's money" : "in pounds at the time (not adjusted for inflation)";
   const raceNames = { buy: "Home's price gain", rent: "Same cash invested instead" };
+  const costDeflate = (n: number, year: number) => (costReal ? n / rows[year].deflator : n);
   const housingCost: SeriesPoint[] = rows.slice(1).map((r) => ({
     year: r.year,
-    buy: deflate(r.mortgagePaid + r.runningCosts - r.lodgerIncome, r.year),
-    rent: deflate(r.rentPaid, r.year),
+    buy: costDeflate(r.mortgagePaid + r.runningCosts - r.lodgerIncome, r.year),
+    rent: costDeflate(r.rentPaid, r.year),
   }));
 
   const budget0 = proj.takeHome - p.livingCosts;
@@ -225,7 +245,7 @@ export default function App() {
       </header>
 
       <div className="layout">
-        <aside className="inputs" aria-label="Assumptions">
+        <aside className="inputs" id="inputs" aria-label="Assumptions">
           <section>
             <h2>Starting point</h2>
             <div className="presets presets-stack" role="radiogroup" aria-label="Starting point">
@@ -349,6 +369,7 @@ export default function App() {
               <Tip tip={ex.headline} className="num">{gbpShort(Math.abs(summary.difference))}</Tip> better off{" "}
               <span className="muted">{money}</span>.
             </h2>
+            <a className="jump" href="#inputs">Change the assumptions ↓</a>
             <div className="kpis">
               <div className="kpi">
                 <span className="kpi-label"><span className="key key-buy" /> Buyer's net worth</span>
@@ -433,15 +454,7 @@ export default function App() {
           <section className="card">
             <div className="card-head">
               <h2>Leverage vs compounding</h2>
-              <Segmented<"nominal" | "real">
-                label="Show this chart"
-                value={raceReal ? "real" : "nominal"}
-                onChange={(v) => setRaceReal(v === "real")}
-                options={[
-                  { value: "nominal", label: "Pounds at the time" },
-                  { value: "real", label: "Today's money" },
-                ]}
-              />
+              <MoneySwitch real={raceReal} onChange={setRaceReal} />
             </div>
             <p className="sub">
               The buyer's {gbp(upfront.cashNeeded)} controls a {gbp(p.price)} home, so price growth of {pct(p.houseGrowth)}{" "}
@@ -526,14 +539,15 @@ export default function App() {
           <section className="card">
             <div className="card-head">
               <h2>Rent vs owning costs, each year</h2>
-              <Legend />
+              <MoneySwitch real={costReal} onChange={setCostReal} />
             </div>
             <p className="sub">
               Rent rises every year. The mortgage payment only changes when you remortgage, and it stops once the loan
-              is paid off.
-              Owning includes service charge and maintenance, less lodger income. Each household invests whatever its
-              housing leaves of the same money for housing and investing. {real ? "In today's money." : "In future pounds."}
+              is paid off. Owning includes service charge and maintenance, less lodger income. Each household invests
+              whatever its housing leaves of the same money for housing and investing.{" "}
+              {costReal ? "In today's money." : "In pounds at the time (not adjusted for inflation)."}
             </p>
+            <Legend />
             <p className="note">
               A year's rent is <Tip tip={ex.rentYield}>{pct((rows[1].rentPaid / p.price) * 100)}</Tip> of the home's value
               today and <Tip tip={ex.rentYield}>{pct((lastRow.rentPaid / rows[p.years - 1].propertyValue) * 100)}</Tip> in
@@ -566,16 +580,16 @@ export default function App() {
                     return (
                       <tr key={y}>
                         <th scope="row">{y}</th>
-                        <td><Tip tip={ex.budget(y)}>{gbp(deflate(r.budget, y))}</Tip></td>
+                        <td><Tip tip={ex.budget(y)}>{gbp(costDeflate(r.budget, y))}</Tip></td>
                         <td>
-                          <Tip tip={ex.housingCost(y, "rent")}>{gbp(deflate(r.rentPaid, y))}</Tip> on rent
+                          <Tip tip={ex.housingCost(y, "rent")}>{gbp(costDeflate(r.rentPaid, y))}</Tip> on rent
                           <br />
-                          <Tip tip={ex.invested(y, "rent")} className={r.renterInvested < 0 ? "neg" : ""}>{gbp(deflate(r.renterInvested, y))}</Tip> invested
+                          <Tip tip={ex.invested(y, "rent")} className={r.renterInvested < 0 ? "neg" : ""}>{gbp(costDeflate(r.renterInvested, y))}</Tip> invested
                         </td>
                         <td>
-                          <Tip tip={ex.housingCost(y, "buy")}>{gbp(deflate(buyCost, y))}</Tip> on housing
+                          <Tip tip={ex.housingCost(y, "buy")}>{gbp(costDeflate(buyCost, y))}</Tip> on housing
                           <br />
-                          <Tip tip={ex.invested(y, "buy")} className={r.buyerInvested < 0 ? "neg" : ""}>{gbp(deflate(r.buyerInvested, y))}</Tip> invested
+                          <Tip tip={ex.invested(y, "buy")} className={r.buyerInvested < 0 ? "neg" : ""}>{gbp(costDeflate(r.buyerInvested, y))}</Tip> invested
                         </td>
                       </tr>
                     );

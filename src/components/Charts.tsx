@@ -220,30 +220,23 @@ function GapTooltip({ active, payload, label }: TooltipContentProps<number, stri
 export function GapChart({ data, ariaLabel, height = 280 }: { data: GapPoint[]; ariaLabel: string; height?: number }) {
   const c = usePalette();
   const axis = { fill: c["--ink-3"], fontSize: 12, fontFamily: "var(--mono)" };
-  const max = Math.max(0, ...data.map((d) => d.gap));
-  const min = Math.min(0, ...data.map((d) => d.gap));
-  // Where zero sits between the top (max) and bottom (min) of the plot, for the colour split.
-  const zero = max === min ? 0 : max / (max - min);
+  // Split into the part above zero (buying ahead) and below (renting ahead), each in its own colour.
+  // A side is only drawn where it applies (plus the zero point next to a crossing), so an
+  // empty side doesn't leave a line along zero.
+  const side = (i: number, pick: (g: number) => boolean) => {
+    const g = data[i].gap;
+    if (pick(g)) return g;
+    const near = [data[i - 1]?.gap, data[i + 1]?.gap].some((n) => n !== undefined && pick(n));
+    return near ? 0 : null;
+  };
+  const split = data.map((d, i) => ({ ...d, ahead: side(i, (g) => g > 0), behind: side(i, (g) => g < 0) }));
   return (
     <div className="chart" role="img" aria-label={ariaLabel}>
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={data} margin={{ top: 12, right: 16, bottom: 4, left: 4 }}>
-          <defs>
-            <linearGradient id="gap-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset={0} stopColor={c["--buy"]} stopOpacity={0.28} />
-              <stop offset={zero} stopColor={c["--buy"]} stopOpacity={0.06} />
-              <stop offset={zero} stopColor={c["--rent"]} stopOpacity={0.06} />
-              <stop offset={1} stopColor={c["--rent"]} stopOpacity={0.28} />
-            </linearGradient>
-            <linearGradient id="gap-stroke" x1="0" y1="0" x2="0" y2="1">
-              <stop offset={zero} stopColor={c["--buy"]} />
-              <stop offset={zero} stopColor={c["--rent"]} />
-            </linearGradient>
-          </defs>
+        <AreaChart data={split} margin={{ top: 12, right: 16, bottom: 4, left: 4 }}>
           <CartesianGrid stroke={c["--grid"]} vertical={false} />
           <XAxis dataKey="year" tick={axis} tickLine={false} axisLine={{ stroke: c["--grid"] }} interval="preserveStartEnd" minTickGap={24} />
-          <YAxis tick={axis} tickLine={false} axisLine={false} tickFormatter={(v: number) => (v === 0 ? "£0" : gbpShort(Math.abs(v)))} width={56} />
-          <ReferenceLine y={0} stroke={c["--ink-3"]} />
+          <YAxis tick={axis} tickLine={false} axisLine={false} tickFormatter={(v: number) => (v === 0 ? "Level" : `${v > 0 ? "Buy" : "Rent"} +${gbpShort(Math.abs(v))}`)} width={108} />
           <Tooltip
             content={(props) => <GapTooltip {...(props as TooltipContentProps<number, string>)} />}
             cursor={{ stroke: c["--ink-3"], strokeWidth: 1 }}
@@ -251,14 +244,27 @@ export function GapChart({ data, ariaLabel, height = 280 }: { data: GapPoint[]; 
           />
           <Area
             type="monotone"
-            dataKey="gap"
-            stroke="url(#gap-stroke)"
+            dataKey="ahead"
+            stroke={c["--buy"]}
             strokeWidth={2}
-            fill="url(#gap-fill)"
+            fill={c["--buy"]}
+            fillOpacity={0.14}
             baseValue={0}
             isAnimationActive={false}
-            activeDot={{ r: 5, fill: c["--ink-2"], stroke: c["--surface"], strokeWidth: 2 }}
+            activeDot={false}
           />
+          <Area
+            type="monotone"
+            dataKey="behind"
+            stroke={c["--rent"]}
+            strokeWidth={2}
+            fill={c["--rent"]}
+            fillOpacity={0.14}
+            baseValue={0}
+            isAnimationActive={false}
+            activeDot={false}
+          />
+          <ReferenceLine y={0} stroke={c["--ink-3"]} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

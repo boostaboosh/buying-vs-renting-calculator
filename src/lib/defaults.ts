@@ -203,8 +203,8 @@ export const PRESETS = {
         sources: ["pipr", "housemetric"],
       },
       houseGrowth: {
-        text: "2% a year, the same as inflation, so prices stay flat in real terms. That's roughly what London flats have done over 20 years (0.1% a year above inflation, from Land Registry data). Over the last 5 years they fell 4.9% a year after inflation. Pay has grown faster than this, so there's a case for higher; the break-even figure shows how much it matters.",
-        sources: ["housemetric", "ukhpi"],
+        text: "2% a year: the same as inflation, so the home keeps its value in real terms but doesn't gain. That's roughly what London flats have done over 20 years (0.1% a year above inflation, from Land Registry data). The last 5 years were worse, at 4.9% a year below inflation, which argues for a lower figure. Over the long run, prices are limited by what people earn, and pay is expected to grow about 3.4% a year, which argues for a higher one. 2% sits between the two. The break-even figure shows how much it matters.",
+        sources: ["housemetric", "ukhpi", "obr"],
       },
       earners: {
         text: "Two, because the average London home costs 11 times one median salary. On one median salary a lender would offer about £224,000, and the average rent would take most of your take-home pay.",

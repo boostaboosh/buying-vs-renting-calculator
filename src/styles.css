@@ -842,3 +842,19 @@ table {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* On narrow screens the answer comes first; the assumptions follow, one tap away. */
+.jump {
+  display: none;
+  justify-self: start;
+  color: var(--buy);
+  font-weight: 500;
+}
+@media (max-width: 979px) {
+  .results {
+    order: -1;
+  }
+  .jump {
+    display: inline-block;
+  }
+}

@@ -10,5 +10,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     globals: true,
     environment: "node",
+    // Browser tests in e2e/ run under Playwright, not Vitest.
+    exclude: ["e2e/**", "node_modules/**"],
   },
 }));
