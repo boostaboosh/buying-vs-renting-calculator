@@ -47,6 +47,18 @@ test("the race shows when yearly gains cross and when totals catch up", async ({
   await expect(race.locator("dt:has-text(\"Invested cash catches up in total\") + dd")).toContainText(/Year|Not within/);
 });
 
+test("both households' net worths are mostly shares after a few years", async ({ page }) => {
+  await openPage(page);
+  const comp = card(page, "Where each net worth comes from");
+  // Year 30 is the last milestone: the buyer's bar has both parts, the renter's only shares.
+  const last = comp.locator(".comp-year").last();
+  await expect(last.locator(".comp-label")).toHaveText("Year 30");
+  const buyerSegments = last.locator(".comp-row").first().locator(".seg");
+  const homeWidth = await buyerSegments.nth(0).evaluate((el) => el.getBoundingClientRect().width);
+  const sharesWidth = await buyerSegments.nth(1).evaluate((el) => el.getBoundingClientRect().width);
+  expect(sharesWidth).toBeGreaterThan(homeWidth);
+});
+
 test("rent rises and the mortgage stays put in the costs chart by default", async ({ page }) => {
   await openPage(page);
   const costs = card(page, "Rent vs owning costs");

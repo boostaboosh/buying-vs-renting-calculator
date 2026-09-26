@@ -186,6 +186,20 @@ export default function App() {
   const raceMarker = raceTotals
     ? race.catchUpYear && { x: race.catchUpYear, label: `Invested cash catches up in total in year ${race.catchUpYear}` }
     : race.overtakeYear && { x: race.overtakeYear, label: `Invested cash gains more each year from year ${race.overtakeYear}` };
+  // Where each net worth comes from, at a few milestone years.
+  const compYears = [1, 5, 10, 20, 30].filter((y) => y < p.years).concat(p.years);
+  const comp = compYears.map((y) => {
+    const r = rows[y];
+    return {
+      year: y,
+      equity: deflate(r.equity, y),
+      buyerShares: deflate(r.buyerPortfolio, y),
+      renterShares: deflate(r.renterPortfolio, y),
+    };
+  });
+  const compMax = Math.max(1, ...comp.map((c) => Math.max(0, c.equity) + Math.max(0, c.buyerShares)), ...comp.map((c) => Math.max(0, c.renterShares)));
+  const barPct = (v: number) => `${(Math.max(0, v) / compMax) * 100}%`;
+  const interestSoFar = rows.slice(1).reduce((sum, r) => sum + raceDeflate(r.interestPaid, r.year), 0);
   const raceFirst = race.rows[0];
   const raceLast = race.rows[race.rows.length - 1];
   const raceMoney = raceReal ? "in today's money" : "in pounds at the time (not adjusted for inflation)";
@@ -452,8 +466,66 @@ export default function App() {
               {summary.crossoverYear
                 ? `Buying catches up in year ${summary.crossoverYear}${buyWins ? " and stays ahead" : ", but renting finishes ahead"}.`
                 : `Buying doesn't catch up within ${p.years} years.`}{" "}
-              The three charts below show why.
+              The two households' net worths rise at a similar rate because both put their spare money into the same
+              fund; the next chart shows how each is made up.
             </p>
+          </section>
+          <section className="card">
+            <h2>Where each net worth comes from</h2>
+            <p className="sub">
+              Both households put their spare money into the same global index fund, so after a few years most of both
+              net worths is shares, growing at the same rate. That's why the two lines rise together. They differ by the
+              buyer's home equity against the renter's extra shares from the deposit, by who has more spare cash each
+              month, and by the interest the buyer pays. {real ? "In today's money." : "In future pounds."}
+            </p>
+            <div className="legend" aria-hidden="true">
+              <span><span className="swatch swatch-home" /> Home equity (value minus mortgage and selling costs)</span>
+              <span><span className="swatch swatch-shares" /> Shares</span>
+            </div>
+            <div className="composition">
+              {comp.map((c) => (
+                <div className="comp-year" key={c.year}>
+                  <div className="comp-label">Year {c.year}</div>
+                  <div className="comp-row">
+                    <span className="comp-who"><span className="key key-buy" /> Buyer</span>
+                    <div className="comp-bar" role="img" aria-label={`Buyer, year ${c.year}: home equity ${gbp(c.equity)}, shares ${gbp(c.buyerShares)}`}>
+                      <span className="seg seg-home" style={{ width: barPct(c.equity) }} />
+                      <span className="seg seg-shares" style={{ width: barPct(c.buyerShares) }} />
+                    </div>
+                    <Tip
+                      className="comp-total"
+                      tip={{
+                        title: `Buyer's net worth, year ${c.year}`,
+                        body: (
+                          <p className="calc">
+                            Home equity {gbp(c.equity)}
+                            <br />+ shares {gbp(c.buyerShares)}
+                            <br />= {gbp(c.equity + c.buyerShares)}
+                          </p>
+                        ),
+                      }}
+                    >
+                      {gbpShort(c.equity + c.buyerShares)}
+                    </Tip>
+                  </div>
+                  <div className="comp-row">
+                    <span className="comp-who"><span className="key key-rent" /> Renter</span>
+                    <div className="comp-bar" role="img" aria-label={`Renter, year ${c.year}: shares ${gbp(c.renterShares)}`}>
+                      <span className="seg seg-shares" style={{ width: barPct(c.renterShares) }} />
+                    </div>
+                    <Tip
+                      className="comp-total"
+                      tip={{
+                        title: `Renter's net worth, year ${c.year}`,
+                        body: <p className="calc">Shares {gbp(c.renterShares)}, after tax</p>,
+                      }}
+                    >
+                      {gbpShort(c.renterShares)}
+                    </Tip>
+                  </div>
+                </div>
+              ))}
+            </div>
           </section>
           <h2 className="group-title">What drives the result</h2>
           <section className="card">
@@ -517,6 +589,31 @@ export default function App() {
               </div>
             </dl>
             )}
+            <p className="note">
+              The quick sum (the home's gain against the deposit's returns) leaves out the bank's cut: the buyer pays{" "}
+              <Tip
+                tip={{
+                  title: `Interest paid over ${p.years} years`,
+                  body: (
+                    <>
+                      <p>
+                        Every year's mortgage interest added up, {raceReal ? "in today's money" : "in pounds at the time"}.
+                        It's the price of controlling the whole home with the bank's money.
+                      </p>
+                      <p className="calc">
+                        Year 1: {gbp(y1.interest)}; it falls as the loan is paid off, and changes when you remortgage.
+                      </p>
+                    </>
+                  ),
+                  sources: ["moneyfacts"],
+                }}
+              >
+                {gbp(interestSoFar)}
+              </Tip>{" "}
+              of interest over {p.years} years, against the home's total
+              gain of {gbp(raceDeflate(raceLast?.homeTotal ?? 0, p.years))}. The rest of the sum is in the
+              charts below.
+            </p>
             <p className="note">
               {race.overtakeYear && race.catchUpYear !== race.overtakeYear
                 ? `Two different moments: from year ${race.overtakeYear} the invested cash gains more each year, but the home has already banked years of bigger gains, so the totals only meet ${race.catchUpYear ? `in year ${race.catchUpYear}` : `after year ${p.years}`}. `

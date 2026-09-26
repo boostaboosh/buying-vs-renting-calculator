@@ -241,6 +241,17 @@ catchUpYear }`:
 
 All figures are nominal.
 
+### Property: the simple case matches the leverage race
+With no interest (`mortgageRate = followOnRate = 0`, interest-only), no stamp duty
+(a price of £300,000 or less for a first-time buyer), no fees, running costs,
+selling costs or rent, no new saving (`livingCosts` = take-home pay), no tax on
+investments (`useIsa = false`) and 0% inflation, the projection reduces to the
+race between the home and the deposit:
+- buyer's net worth after `t` years = `deposit + homeTotal(t)`
+- renter's net worth after `t` years = `cashNeeded + cashTotal(t)`
+
+This ties the full projection to the simple sum people do in their heads.
+
 ### `breakevenHouseGrowth(inputs)`
 The `houseGrowth` at which the nominal `difference` at the horizon is 0. Rent
 growth moves with it, keeping the gap you chose between them: when testing a
