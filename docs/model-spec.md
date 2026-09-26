@@ -79,7 +79,9 @@ Two input sets are exported:
 | deposit | 95,000 | |
 | firstTimeBuyer | true | stamp duty relief |
 | purchaseFees | 3,000 | legal, survey, arrangement fee |
-| mortgageRate | 3 | %, fixed for the whole term |
+| mortgageRate | 3 | %, the starting fixed rate |
+| fixYears | 5 | years the starting rate is fixed |
+| followOnRate | 3 | % rate after the fixed period ends, for the rest of the term (a remortgage) |
 | mortgageTerm | 30 | years |
 | mortgageType | "repayment" | or "interestOnly" |
 | serviceCharge | 2,000 | £/yr (service charge, ground rent, insurance) |
@@ -124,12 +126,16 @@ portfolio.
 - Service charge per month: `serviceCharge × (1 + inflation)^y / 12`.
 
 **Each month, in this order.**
-1. Mortgage. Interest = balance × `mortgageRate/100/12`.
-   - Repayment: pay the fixed `mortgagePayment(loan, rate, term)` while within
-     the term; the balance falls by payment − interest. After the term, nothing
-     is paid and the balance is 0.
-   - Interest-only: pay the interest only; the balance stays at `loan` for the
-     whole projection, even beyond the term.
+1. Mortgage. The rate for month `m` is `mortgageRate` while `m < fixYears × 12`
+   and `followOnRate` from then on. Interest = balance × rate/100/12.
+   - Repayment: pay `mortgagePayment(loan, mortgageRate, mortgageTerm)` during the
+     fixed period. At month `fixYears × 12`, if that's still within the term, the
+     payment is reset to `mortgagePayment(balance at that point, followOnRate,
+     mortgageTerm − fixYears)` and stays at that amount to the end of the term.
+     The balance falls by payment − interest. After the term, nothing is paid and
+     the balance is 0. If `fixYears ≥ mortgageTerm`, only the starting rate is used.
+   - Interest-only: pay the interest only, at that month's rate. The balance stays
+     at `loan` for the whole projection, even beyond the term.
 2. Buyer's housing cost = mortgage paid + service charge + maintenance
    (`current property value × maintenancePct/100/12`) − net lodger income.
 3. Cash flows (signed): renter gets `budget − rent`; buyer gets
@@ -175,8 +181,11 @@ there are `years + 1` rows. Each row has:
 - `deflator = (1 + inflation/100)^year`. Divide a nominal amount by it to get
   today's money.
 
-**Other outputs.** `upfront`, `monthlyMortgage` (the repayment payment, or
-`loan × rate/12` for interest-only), `takeHome` (household: `earners × takeHomePay(salary)`), `marginalRate`, and
+**Other outputs.** `upfront`, `monthlyMortgage` (the starting payment: the repayment
+amount, or `loan × mortgageRate/100/12` for interest-only), `followOnMonthlyMortgage`
+(the payment after the fixed period: the reset repayment amount above, or
+`loan × followOnRate/100/12` for interest-only; equal to `monthlyMortgage` when
+`fixYears ≥ mortgageTerm`), `takeHome` (household: `earners × takeHomePay(salary)`), `marginalRate`, and
 `renterRanDryYear` / `buyerRanDryYear`: the first year (1-based) that ended with
 a shortfall, else null. `totals` has lifetime sums of rent, interest, capital
 repaid, running costs and net lodger income, plus `purchaseCosts` (stamp duty +
@@ -192,19 +201,31 @@ All are divided by that row's deflator when `real` is true. `crossoverYear` is t
 first year ≥ 1 where buyer net worth ≥ renter net worth, else null.
 
 ### `breakevenHouseGrowth(inputs)`
-The `houseGrowth` at which the nominal `difference` at the horizon is 0, holding
-all other inputs fixed. Searches −10% to +20% and is accurate to
+The `houseGrowth` at which the nominal `difference` at the horizon is 0. Rent
+growth moves with it, keeping the gap you chose between them: when testing a
+house growth of `g`, rent growth is `rentGrowth + (g − houseGrowth)`. (Holding
+rent growth fixed while prices fall gives misleading answers, because in the long
+run rents and prices move together.) All other inputs are held fixed. Searches −10% to +20% and is accurate to
 0.01 percentage points. Returns null if the difference doesn't change sign in that
 range.
 
 ### `yearOneCosts(inputs)`
-Always looks at year one, whatever `years` is set to. Year-one money that neither person gets back:
+The figures describe year one. The one-off costs are spread over `years` (treated
+as 1 if it's less than 1). Year-one money that neither person gets back:
 - `rent` = the renter's year-one rent.
 - `interest`, `runningCosts` and `lodgerIncome` = the buyer's year-one figures
   from the projection.
 - `opportunityCost = cashNeeded × stockReturn/100`.
 - `expectedGrowth = price × houseGrowth/100`.
-- `buyTotal = interest + runningCosts − lodgerIncome + opportunityCost − expectedGrowth`.
+- `transactionCostsPerYear = (stampDuty + purchaseFees + price × sellingCostPct/100) / years`:
+  buying and selling costs spread over the years you stay.
+- `buyBeforeGrowth = interest + runningCosts − lodgerIncome + opportunityCost + transactionCostsPerYear`.
+- `buyTotal = buyBeforeGrowth − expectedGrowth`.
+- `growthNeeded = (buyBeforeGrowth − rent) / price × 100`: the house price growth
+  (%) in year one at which owning costs the same as renting. Negative means owning
+  is cheaper even if prices fall by that much.
+- `fivePercentRule = price × 5/100`: Ben Felix's rule of thumb for an owner's
+  yearly unrecoverable costs, to compare with a year's rent.
 
 ## 3. Default deposit: `src/lib/defaults.ts`
 

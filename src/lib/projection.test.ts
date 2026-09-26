@@ -96,7 +96,10 @@ describe("breakevenHouseGrowth", () => {
   it("finds the growth rate where both finish level", () => {
     const g = breakevenHouseGrowth(base)!;
     expect(g).not.toBeNull();
-    expect(Math.abs(summarise(project({ ...base, houseGrowth: g })).difference)).toBeLessThan(10);
+    // Spec change: rent growth moves with house growth, keeping the gap
+    // (rentGrowth + (g − houseGrowth)); previously rent growth was held at 3%.
+    const rentGrowth = base.rentGrowth + (g - base.houseGrowth);
+    expect(Math.abs(summarise(project({ ...base, houseGrowth: g, rentGrowth })).difference)).toBeLessThan(10);
   });
 });
 

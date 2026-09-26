@@ -21,7 +21,12 @@ It goes past the usual "rent £24k vs mortgage interest £12k" sum by including:
 - **UK tax.** Stamp duty (England, from April 2025, with first-time buyer relief),
   income tax and NI for take-home pay, ISA allowance with CGT on anything above it,
   CGT-free main home, Rent-a-Room relief for a lodger.
-- **Repayment or interest-only** mortgages, and selling costs at the end.
+- **Repayment or interest-only** mortgages, a fixed period then a remortgage onto
+  a follow-on rate, and selling costs at the end.
+- **Year-one check, Monevator style.** Rent against the money owning loses if
+  prices stay flat (interest, running costs, lost returns on the deposit, and
+  stamp duty and fees spread over your stay), then the price growth needed to
+  break even, and Ben Felix's 5% rule as a sanity check.
 
 **Defaults come from official data**, with three starting points: a London
 household (two median London earners, average London home and rent), a UK

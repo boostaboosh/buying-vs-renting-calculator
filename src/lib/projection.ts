@@ -2,6 +2,7 @@ import {
   cgtOnGia,
   marginalTaxRate,
   mortgagePayment,
+  remainingBalance,
   rentARoomTax,
   stampDuty,
   takeHomePay,
@@ -22,7 +23,9 @@ export interface Inputs {
   deposit: number;
   firstTimeBuyer: boolean;
   purchaseFees: number; // legal, survey, mortgage arrangement fee
-  mortgageRate: number; // %
+  mortgageRate: number; // %, the starting fixed rate
+  fixYears: number; // years the starting rate is fixed
+  followOnRate: number; // % after the fixed period (remortgage)
   mortgageTerm: number; // years
   mortgageType: MortgageType;
   serviceCharge: number; // £/yr: service charge, ground rent, insurance
@@ -55,6 +58,8 @@ export const USER_EXAMPLE: Inputs = {
   firstTimeBuyer: true,
   purchaseFees: 3_000,
   mortgageRate: 3,
+  fixYears: 5,
+  followOnRate: 3,
   mortgageTerm: 30,
   mortgageType: "repayment",
   serviceCharge: 2_000,
@@ -168,7 +173,8 @@ export interface Projection {
   rows: YearRow[]; // rows[0] is purchase day, rows[n] is the end of year n
   upfront: Upfront;
   totals: Totals;
-  monthlyMortgage: number;
+  monthlyMortgage: number; // during the fixed period
+  followOnMonthlyMortgage: number; // after remortgaging onto followOnRate
   takeHome: number;
   marginalRate: number;
   /** First year the renter's or buyer's portfolio ran dry, if ever. */
@@ -204,10 +210,22 @@ export function project(p: Inputs): Projection {
   const marginalRate = marginalTaxRate(p.salary);
   const budget0 = takeHome - p.livingCosts;
 
-  const payment =
-    p.mortgageType === "repayment" ? mortgagePayment(upfront.loan, p.mortgageRate, p.mortgageTerm) : 0;
-  const mRate = p.mortgageRate / 100 / 12;
+  const repayment = p.mortgageType === "repayment";
   const termMonths = p.mortgageTerm * 12;
+  // The starting rate is fixed for fixYears; then the loan is remortgaged onto followOnRate.
+  const remortgages = p.fixYears < p.mortgageTerm;
+  const fixMonths = p.fixYears * 12;
+  const initialPayment = repayment ? mortgagePayment(upfront.loan, p.mortgageRate, p.mortgageTerm) : 0;
+  const followOnPayment = !remortgages
+    ? initialPayment
+    : repayment
+      ? mortgagePayment(
+          remainingBalance(upfront.loan, p.mortgageRate, p.mortgageTerm, fixMonths),
+          p.followOnRate,
+          p.mortgageTerm - p.fixYears,
+        )
+      : 0;
+  let payment = initialPayment;
   const stockM = monthly(p.stockReturn);
   const houseM = monthly(p.houseGrowth);
 
@@ -273,9 +291,14 @@ export function project(p: Inputs): Projection {
     for (let m = 0; m < 12; m++) {
       const month = y * 12 + m;
       // Mortgage: interest accrues on the balance; a repayment loan also pays down capital.
-      const interest = balance * mRate;
+      const afterFix = remortgages && month >= fixMonths;
+      const interest = (balance * (afterFix ? p.followOnRate : p.mortgageRate)) / 100 / 12;
+      // Remortgaging resets the payment to clear what's left over the rest of the term.
+      if (repayment && remortgages && month === fixMonths) {
+        payment = mortgagePayment(balance, p.followOnRate, p.mortgageTerm - p.fixYears);
+      }
       let paid = 0;
-      if (p.mortgageType === "repayment") {
+      if (repayment) {
         if (month < termMonths && balance > 0) {
           paid = Math.min(payment, balance + interest);
           balance = Math.max(0, balance + interest - paid);
@@ -320,7 +343,14 @@ export function project(p: Inputs): Projection {
     rows,
     upfront,
     totals,
-    monthlyMortgage: p.mortgageType === "repayment" ? payment : upfront.loan * mRate,
+    monthlyMortgage: repayment ? initialPayment : (upfront.loan * p.mortgageRate) / 100 / 12,
+    followOnMonthlyMortgage: !remortgages
+      ? repayment
+        ? initialPayment
+        : (upfront.loan * p.mortgageRate) / 100 / 12
+      : repayment
+        ? followOnPayment
+        : (upfront.loan * p.followOnRate) / 100 / 12,
     takeHome,
     marginalRate,
     renterRanDryYear,
@@ -351,10 +381,12 @@ export function summarise(proj: Projection, real = false): Summary {
 
 /**
  * House price growth (%/yr) at which buying and renting finish level at the
- * horizon. Returns null if the answer is outside −10%…+20%.
+ * horizon. Rent growth moves with it, keeping the chosen gap between the two.
+ * Returns null if the answer is outside −10%…+20%.
  */
 export function breakevenHouseGrowth(p: Inputs): number | null {
-  const diff = (g: number) => summarise(project({ ...p, houseGrowth: g })).difference;
+  const diff = (g: number) =>
+    summarise(project({ ...p, houseGrowth: g, rentGrowth: p.rentGrowth + (g - p.houseGrowth) })).difference;
   let lo = -10;
   let hi = 20;
   if (diff(lo) > 0 || diff(hi) < 0) return null;
@@ -374,9 +406,17 @@ export interface UnrecoverableCosts {
   lodgerIncome: number;
   /** What the buyer's cash (deposit, stamp duty, fees) would have earned invested. */
   opportunityCost: number;
+  /** Stamp duty, fees and selling costs spread over the years you stay. */
+  transactionCostsPerYear: number;
+  /** Owning's unrecoverable costs if the price doesn't change. */
+  buyBeforeGrowth: number;
   /** Expected rise in the property's value (a gain, so it reduces the cost). */
   expectedGrowth: number;
   buyTotal: number;
+  /** Year-one house price growth (%) at which owning costs the same as renting. */
+  growthNeeded: number;
+  /** Ben Felix's rule of thumb: 5% of the price a year. */
+  fivePercentRule: number;
 }
 
 export function yearOneCosts(p: Inputs): UnrecoverableCosts {
@@ -384,14 +424,22 @@ export function yearOneCosts(p: Inputs): UnrecoverableCosts {
   const y1 = proj.rows[1];
   const opportunityCost = (proj.upfront.cashNeeded * p.stockReturn) / 100;
   const expectedGrowth = (p.price * p.houseGrowth) / 100;
-  const buyTotal = y1.interestPaid + y1.runningCosts - y1.lodgerIncome + opportunityCost - expectedGrowth;
+  const stay = Math.max(1, p.years);
+  const transactionCostsPerYear =
+    (proj.upfront.stampDuty + p.purchaseFees + (p.price * p.sellingCostPct) / 100) / stay;
+  const buyBeforeGrowth =
+    y1.interestPaid + y1.runningCosts - y1.lodgerIncome + opportunityCost + transactionCostsPerYear;
   return {
     rent: y1.rentPaid,
     interest: y1.interestPaid,
     runningCosts: y1.runningCosts,
     lodgerIncome: y1.lodgerIncome,
     opportunityCost,
+    transactionCostsPerYear,
+    buyBeforeGrowth,
     expectedGrowth,
-    buyTotal,
+    buyTotal: buyBeforeGrowth - expectedGrowth,
+    growthNeeded: p.price > 0 ? ((buyBeforeGrowth - y1.rentPaid) / p.price) * 100 : 0,
+    fivePercentRule: (p.price * 5) / 100,
   };
 }
