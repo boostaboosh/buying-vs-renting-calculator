@@ -192,6 +192,9 @@ export default function App() {
             <Field {...F("deposit", "Deposit")} unit="£" min={0} max={Math.max(p.price, 100_000)} step={1_000}
               hint={<>Loan <Tip tip={ex.deposit}>{gbp(upfront.loan)} ({pct(upfront.loanToValue, 0)} of the price)</Tip>. Lenders' cap: <Tip tip={ex.deposit}>{gbp(upfront.maxLoan)}</Tip>.</>} />
             <Field {...F("mortgageRate", "Mortgage rate")} unit="%" min={0.5} max={9} step={0.05} />
+            <Field {...F("fixYears", "Fixed for")} unit="yrs" min={1} max={40} step={1} />
+            <Field {...F("followOnRate", "Rate after the fix")} unit="%" min={0.5} max={10} step={0.05}
+              hint={p.fixYears < p.mortgageTerm ? <>Payment then: <Tip tip={ex.monthlyMortgage}>{gbp(proj.followOnMonthlyMortgage)} a month</Tip>.</> : "The fix lasts the whole term."} />
             <Segmented<MortgageType>
               label="Mortgage type"
               tip={fieldTip("mortgageType", "Mortgage type")}
@@ -203,7 +206,7 @@ export default function App() {
               ]}
             />
             <Field {...F("mortgageTerm", "Term")} unit="yrs" min={5} max={40} step={1}
-              hint={<><Tip tip={ex.monthlyMortgage}>{gbp(proj.monthlyMortgage)} a month</Tip>, fixed.</>} />
+              hint={<><Tip tip={ex.monthlyMortgage}>{gbp(proj.monthlyMortgage)} a month</Tip> during the fix.</>} />
             <Toggle label="First-time buyer" tip={fieldTip("firstTimeBuyer", "First-time buyer")} checked={p.firstTimeBuyer} onChange={set("firstTimeBuyer")}
               hint={<>Stamp duty: <Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip>{p.firstTimeBuyer && !ftb ? " (no relief above £500,000)" : ""}.</>} />
             <Field {...F("purchaseFees", "Legal, survey & mortgage fees")} unit="£" min={0} max={15_000} step={250} />
@@ -338,10 +341,22 @@ export default function App() {
                   <tr><th>Service charge &amp; maintenance</th><td><Tip tip={ex.y1Running}>{gbp(y1.runningCosts)}</Tip></td></tr>
                   {y1.lodgerIncome > 0 && <tr><th>Lodger income, after tax</th><td><Tip tip={ex.y1Lodger}>−{gbp(y1.lodgerIncome)}</Tip></td></tr>}
                   <tr><th>Lost returns on the {gbp(upfront.cashNeeded)} spent buying</th><td><Tip tip={ex.y1Opportunity}>{gbp(y1.opportunityCost)}</Tip></td></tr>
-                  <tr><th>Expected rise in the home's value</th><td><Tip tip={ex.y1Growth}>−{gbp(y1.expectedGrowth)}</Tip></td></tr>
+                  <tr><th>Stamp duty, fees and selling costs, spread over {Math.max(1, p.years)} years</th><td><Tip tip={ex.y1Transaction}>{gbp(y1.transactionCostsPerYear)}</Tip></td></tr>
+                  <tr className="subtotal"><th>Money gone if prices stay flat</th><td><Tip tip={ex.y1BeforeGrowth}>{gbp(y1.buyBeforeGrowth)}</Tip></td></tr>
+                  <tr><th>Expected rise in the home's value at {pct(p.houseGrowth)}</th><td><Tip tip={ex.y1Growth}>−{gbp(y1.expectedGrowth)}</Tip></td></tr>
                   <tr className="total"><th>Money gone</th><td><Tip tip={ex.y1BuyTotal}>{gbp(y1.buyTotal)}</Tip></td></tr>
                 </tbody>
               </table>
+            </div>
+            <div className="checks">
+              <p>
+                <strong>Price growth needed to match renting:</strong>{" "}
+                <Tip tip={ex.growthNeeded}>{pct(y1.growthNeeded, 1)} in year one</Tip>. You assumed {pct(p.houseGrowth)}.
+              </p>
+              <p>
+                <strong>5% rule of thumb:</strong> <Tip tip={ex.fivePercent}>{gbp(y1.fivePercentRule)} a year</Tip> vs rent{" "}
+                {gbp(y1.rent)}, which suggests {y1.rent < y1.fivePercentRule ? "renting" : "buying"} is cheaper.
+              </p>
             </div>
             <p className="note">
               Also paid once: stamp duty <Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip> and fees{" "}
@@ -358,7 +373,8 @@ export default function App() {
               <Legend />
             </div>
             <p className="sub">
-              Rent rises every year. A fixed-rate mortgage payment doesn't, and it stops once the loan is paid off.
+              Rent rises every year. The mortgage payment only changes when you remortgage, and it stops once the loan
+              is paid off.
               Owning includes service charge and maintenance, less lodger income. Each household invests whatever its
               housing leaves of the same money for housing and investing. {real ? "In today's money." : "In future pounds."}
             </p>
@@ -542,8 +558,9 @@ export default function App() {
                 home. The effect shrinks as the loan is paid off and the renter's investments grow.
               </li>
               <li>
-                <strong>Fixed mortgage, rising rent.</strong> The mortgage payment is set on day one. Rent grows at{" "}
-                {pct(p.rentGrowth)} a year, so owning gets cheaper each year in today's money and renting doesn't.
+                <strong>Fixed mortgage, rising rent.</strong> The mortgage payment only changes when you remortgage
+                after the {p.fixYears}-year fix. It doesn't rise with inflation. Rent grows at {pct(p.rentGrowth)} a year,
+                so over time owning gets cheaper in today's money and renting doesn't.
               </li>
               <li>
                 <strong>Tax.</strong> Your main home is free of capital gains tax. Investments go into ISAs first (£20,000
@@ -556,8 +573,8 @@ export default function App() {
                 a diversified portfolio, but faces rent rises and moves.
               </li>
               <li>
-                <strong>Simplifications.</strong> One mortgage rate for the whole term, no pensions, and England, Wales and
-                Northern Ireland tax rules.
+                <strong>Simplifications.</strong> One remortgage, onto a single rate for the rest of the term. No pensions.
+                England, Wales and Northern Ireland tax rules.
               </li>
             </ul>
           </section>

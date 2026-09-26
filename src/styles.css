@@ -815,3 +815,21 @@ table {
 .flows {
   min-width: 480px;
 }
+
+.ledger tr.subtotal th,
+.ledger tr.subtotal td {
+  color: var(--ink);
+  font-weight: 500;
+  border-top: 1px solid var(--ink-3);
+}
+.checks {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.checks p {
+  margin: 0;
+}

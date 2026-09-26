@@ -201,13 +201,16 @@ export function explain({ p, proj, summary, real, breakeven, y1 }: Context) {
       body: (
         <>
           <p>
-            The yearly house price growth at which buying and renting finish level after {p.years} years, with every
-            other input unchanged. Faster growth favours buying; slower growth favours renting.
+            The yearly house price growth at which buying and renting finish level after {p.years} years. Faster
+            growth favours buying; slower growth favours renting.
           </p>
           <p className="calc">
             {breakeven == null ? "Not between −10% and +20% a year" : `${pct(breakeven, 2)} a year (you assumed ${pct(p.houseGrowth)})`}
           </p>
-          <p>Rent keeps growing at {pct(p.rentGrowth)} in this test, even if house prices fall.</p>
+          <p>
+            Rent growth moves with house prices in this test, keeping the gap you set between them (
+            {pct(p.rentGrowth - p.houseGrowth)}), because over the long run rents and prices rise and fall together.
+          </p>
         </>
       ),
       sources: ["ukhpi"],
@@ -287,23 +290,93 @@ export function explain({ p, proj, summary, real, breakeven, y1 }: Context) {
       sources: ["ukhpi"],
     } satisfies TipContent,
 
-    y1BuyTotal: {
-      title: "Money gone by owning, year one",
+    y1Transaction: {
+      title: "Buying and selling costs, spread out",
       body: (
         <>
-          <p>What owning costs you in year one, counting only money you don't get back.</p>
+          <p>
+            Stamp duty, buying fees and the cost of selling are paid once but lost for good. Spread over the{" "}
+            {Math.max(1, p.years)} years you'd stay, they cost this much a year.
+          </p>
+          <p className="calc">
+            ({gbp(upfront.stampDuty)} + {gbp(upfront.fees)} + {pct(p.sellingCostPct)} × {gbp(p.price)}) ÷{" "}
+            {Math.max(1, p.years)} = {gbp(y1.transactionCostsPerYear)}
+          </p>
+          <p>The shorter you stay, the bigger this gets.</p>
+        </>
+      ),
+      sources: ["sdlt"],
+    } satisfies TipContent,
+
+    y1BeforeGrowth: {
+      title: "Money gone before any change in the home's value",
+      body: (
+        <>
           <p className="calc">
             {gbp(y1.interest)} + {gbp(y1.runningCosts)}
-            {y1.lodgerIncome > 0 && <> − {gbp(y1.lodgerIncome)}</>} + {gbp(y1.opportunityCost)} −{" "}
-            {gbp(y1.expectedGrowth)} = {gbp(y1.buyTotal)}
+            {y1.lodgerIncome > 0 && <> − {gbp(y1.lodgerIncome)}</>} + {gbp(y1.opportunityCost)} +{" "}
+            {gbp(y1.transactionCostsPerYear)} = {gbp(y1.buyBeforeGrowth)}
           </p>
           <p>
-            Compare with {gbp(y1.rent)} of rent. Paying off the loan isn't a cost; it's saving, so it isn't
-            counted here.
+            This is the figure to compare with rent ({gbp(y1.rent)}) if you think prices won't rise. Paying off the loan
+            isn't counted: it's saving.
           </p>
         </>
       ),
       sources: ["monevatorBuy", "monevatorRent"],
+    } satisfies TipContent,
+
+    y1BuyTotal: {
+      title: "Money gone by owning, year one",
+      body: (
+        <>
+          <p>What owning costs you in year one after the expected change in the home's value.</p>
+          <p className="calc">
+            {gbp(y1.buyBeforeGrowth)} − {gbp(y1.expectedGrowth)} = {gbp(y1.buyTotal)}
+          </p>
+          <p>Compare with {gbp(y1.rent)} of rent. Whether the price rises is the big unknown.</p>
+        </>
+      ),
+      sources: ["monevatorBuy", "monevatorRent"],
+    } satisfies TipContent,
+
+    growthNeeded: {
+      title: "Price growth needed to match renting",
+      body: (
+        <>
+          <p>How much the home's value must rise in year one for owning to cost the same as renting.</p>
+          <p className="calc">
+            ({gbp(y1.buyBeforeGrowth)} − {gbp(y1.rent)} rent) ÷ {gbp(p.price)} = {pct(y1.growthNeeded, 2)}
+          </p>
+          <p>
+            {y1.growthNeeded <= 0
+              ? "Negative means owning is cheaper even if prices fall this much."
+              : `You assumed ${pct(p.houseGrowth)}. London flats have roughly matched inflation over 20 years.`}
+          </p>
+        </>
+      ),
+      sources: ["housemetric", "ukhpi"],
+    } satisfies TipContent,
+
+    fivePercent: {
+      title: "The 5% rule of thumb",
+      body: (
+        <>
+          <p>
+            Ben Felix (PWL Capital) estimates an owner's yearly unrecoverable costs at about 5% of the home's value:
+            1% maintenance, 1% property tax and 3% cost of capital. If a year's rent is less than this, renting is
+            likely cheaper.
+          </p>
+          <p className="calc">
+            5% × {gbp(p.price)} = {gbp(y1.fivePercentRule)} vs rent {gbp(y1.rent)}
+          </p>
+          <p>
+            It's a quick check, not a model. It was built for Canada, where the 1% property tax has no UK equivalent
+            (council tax is paid by renters too), and it assumes prices rise.
+          </p>
+        </>
+      ),
+      sources: ["felix"],
     } satisfies TipContent,
 
     deposit: {
@@ -395,9 +468,15 @@ export function explain({ p, proj, summary, real, breakeven, y1 }: Context) {
               : `Interest-only: you pay just the interest, and still owe the full ${gbp(upfront.loan)} at the end.`}
           </p>
           <p className="calc">
-            {gbp(proj.monthlyMortgage)} a month = {gbp(proj.monthlyMortgage * 12)} a year, the same every year
+            {gbp(proj.monthlyMortgage)} a month for the {p.fixYears}-year fix at {pct(p.mortgageRate, 2)}
+            {p.fixYears < p.mortgageTerm && (
+              <>
+                <br />
+                then {gbp(proj.followOnMonthlyMortgage)} a month at {pct(p.followOnRate, 2)}
+              </>
+            )}
           </p>
-          <p>Rent rises over time, but this payment doesn't.</p>
+          <p>The payment only changes when you remortgage. Rent rises every year.</p>
         </>
       ),
       sources: ["boeRates"],
