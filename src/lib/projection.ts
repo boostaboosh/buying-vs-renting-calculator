@@ -146,6 +146,10 @@ export interface YearRow {
   buyerNetWorth: number;
   // Both
   budget: number; // money available for housing + investing this year
+  // Growth this year: leverage (the home, on the whole price) vs compounding (investments)
+  houseGain: number;
+  renterInvestmentGain: number; // before tax, excluding new money paid in
+  buyerInvestmentGain: number;
   /** Divide nominal £ by this to get today's money. */
   deflator: number;
 }
@@ -272,6 +276,9 @@ export function project(p: Inputs): Projection {
     lodgerIncome: 0,
     buyerInvested: 0,
     budget: 0,
+    houseGain: 0,
+    renterInvestmentGain: 0,
+    buyerInvestmentGain: 0,
   };
   const rows: YearRow[] = [snapshot(0, zero)];
   let renterRanDryYear: number | null = null;
@@ -287,6 +294,7 @@ export function project(p: Inputs): Projection {
     const lodgerGross = p.lodgerRent * Math.pow(1 + p.rentGrowth / 100, y);
     const lodgerNet = lodgerGross - rentARoomTax(lodgerGross * 12, marginalRate) / 12;
     const serviceCharge = (p.serviceCharge * Math.pow(1 + p.inflation / 100, y)) / 12;
+    const valueAtStart = houseValue;
 
     for (let m = 0; m < 12; m++) {
       const month = y * 12 + m;
@@ -313,6 +321,8 @@ export function project(p: Inputs): Projection {
       // Signed flows: a negative number means selling investments to pay for housing.
       renterIsaRoom = flow(renter, budget - rent, renterIsaRoom, p.useIsa);
       buyerIsaRoom = flow(buyer, budget - buyerCost, buyerIsaRoom, p.useIsa);
+      acc.renterInvestmentGain += (renter.isa + renter.gia) * stockM;
+      acc.buyerInvestmentGain += (buyer.isa + buyer.gia) * stockM;
       grow(renter, stockM);
       grow(buyer, stockM);
       houseValue *= 1 + houseM;
@@ -328,6 +338,7 @@ export function project(p: Inputs): Projection {
       totals.capitalRepaid += Math.max(0, paid - interest);
     }
 
+    acc.houseGain = houseValue - valueAtStart;
     totals.rent += acc.rentPaid;
     totals.interest += acc.interestPaid;
     totals.runningCosts += acc.runningCosts;
@@ -377,6 +388,15 @@ export function summarise(proj: Projection, real = false): Summary {
     difference: (last.buyerNetWorth - last.renterNetWorth) / d,
     crossoverYear: crossover ? crossover.year : null,
   };
+}
+
+/**
+ * First year the renter's investment returns are at least the home's price gain:
+ * where compounding on a smaller pot overtakes leverage on the whole price.
+ */
+export function compoundingOvertakesYear(proj: Projection): number | null {
+  const row = proj.rows.find((r) => r.year > 0 && r.renterInvestmentGain >= r.houseGain);
+  return row ? row.year : null;
 }
 
 /**

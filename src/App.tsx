@@ -7,6 +7,7 @@ import {
   type Inputs,
   type MortgageType,
   breakevenHouseGrowth,
+  compoundingOvertakesYear,
   project,
   summarise,
   yearOneCosts,
@@ -56,7 +57,8 @@ export default function App() {
       ),
     [p],
   );
-  const ex = explain({ p, proj, summary, real, breakeven, y1 });
+  const overtake = compoundingOvertakesYear(proj);
+  const ex = explain({ p, proj, summary, real, breakeven, y1, overtake });
 
   /** The explanation for an input: what it is, its default here, and why. */
   const fieldTip = (k: keyof Inputs, title: string): TipContent => {
@@ -88,6 +90,12 @@ export default function App() {
     buy: deflate(r.buyerNetWorth, r.year),
     rent: deflate(r.renterNetWorth, r.year),
   }));
+  const race: SeriesPoint[] = rows.slice(1).map((r) => ({
+    year: r.year,
+    buy: deflate(r.houseGain, r.year),
+    rent: deflate(r.renterInvestmentGain, r.year),
+  }));
+  const raceNames = { buy: "Home's price gain", rent: "Renter's investment returns" };
   const housingCost: SeriesPoint[] = rows.slice(1).map((r) => ({
     year: r.year,
     buy: deflate(r.mortgagePaid + r.runningCosts - r.lodgerIncome, r.year),
@@ -318,6 +326,60 @@ export default function App() {
               crossover={summary.crossoverYear}
               ariaLabel={`Net worth over ${p.years} years. Buyer ends at ${gbp(summary.finalBuyer)}, renter at ${gbp(summary.finalRenter)}.`}
             />
+          </section>
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Leverage vs compounding</h2>
+              <Legend names={raceNames} />
+            </div>
+            <p className="sub">
+              The home grows at a lower rate on a bigger sum: {pct(p.houseGrowth)} a year on {gbp(p.price)}, bought with{" "}
+              {gbp(p.deposit)} of your own money. The renter's investments grow at a higher rate on a smaller sum that
+              keeps getting bigger. Each line is the money gained that year, {money}.
+            </p>
+            <TwoLineChart
+              data={race}
+              height={240}
+              names={raceNames}
+              marker={overtake ? { x: overtake, label: `Compounding overtakes from year ${overtake}` } : null}
+              ariaLabel="Yearly gain from the home's price against the renter's investment returns"
+              footer={(r) => `${r.rent >= r.buy ? "Renter's investments" : "The home"} gained ${gbp(Math.abs(r.rent - r.buy))} more`}
+            />
+            <dl className="facts">
+              <div>
+                <dt>Home's gain, year 1</dt>
+                <dd><Tip tip={ex.raceHome}>{gbp(rows[1].houseGain)}</Tip></dd>
+              </div>
+              <div>
+                <dt>On your deposit, that's</dt>
+                <dd><Tip tip={ex.raceHome}>{pct((rows[1].houseGain / Math.max(1, p.deposit)) * 100)}</Tip></dd>
+              </div>
+              <div>
+                <dt>Renter's returns, year 1</dt>
+                <dd><Tip tip={ex.raceRenter}>{gbp(rows[1].renterInvestmentGain)}</Tip></dd>
+              </div>
+              <div>
+                <dt>Compounding overtakes</dt>
+                <dd><Tip tip={ex.raceOvertake}>{overtake ? `Year ${overtake}` : "Not yet"}</Tip></dd>
+              </div>
+            </dl>
+            <p className="note">
+              This chart isn't the whole race. The buyer invests too: by year {p.years} their own investments earn{" "}
+              <Tip tip={{
+                title: `Buyer's investment returns, year ${p.years}`,
+                body: <p>What the buyer's own investments earned in the final year, before tax, {money}. The buyer invests whatever the mortgage and running costs leave, and more once the loan is paid off.</p>,
+              }}>{gbp(deflate(lastRow.buyerInvestmentGain, p.years))}</Tip>{" "}
+              a year, against the renter's {gbp(deflate(lastRow.renterInvestmentGain, p.years))}. Paying off the loan is
+              saving, and the mortgage doesn't rise with inflation the way rent does. The net worth chart adds it all up.
+            </p>
+            <p className="note">
+              Leverage isn't free: the buyer pays <Tip tip={ex.y1Interest}>{gbp(y1.interest)}</Tip> of interest in year one
+              for it, and that's counted in the net worth above. It also works in reverse: a 10% fall in price would
+              take {gbp(p.price * 0.1)} off a {gbp(p.deposit)} deposit. These are steady averages. In reality shares swing
+              more from year to year, but they're spread across thousands of companies, while a home is one asset in one
+              place and the mortgage magnifies its ups and downs on your money.
+            </p>
           </section>
 
           <section className="card">
@@ -554,8 +616,9 @@ export default function App() {
                 quick sum.
               </li>
               <li>
-                <strong>Leverage.</strong> The buyer puts down {gbp(p.deposit)} but gets the growth on a {gbp(p.price)}{" "}
-                home. The effect shrinks as the loan is paid off and the renter's investments grow.
+                <strong>Leverage vs compounding.</strong> The buyer puts down {gbp(p.deposit)} but gets the growth on a{" "}
+                {gbp(p.price)} home: a lower rate on a bigger sum. The renter gets a higher rate on a smaller sum that
+                compounds and keeps growing, so it can catch up. The chart above shows when.
               </li>
               <li>
                 <strong>Fixed mortgage, rising rent.</strong> The mortgage payment only changes when you remortgage
