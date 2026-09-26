@@ -9,10 +9,15 @@
  *     so nothing here depends on ./finance or ./projection internals.
  *  2. Hand-checkable scenarios with 0% rates / 1-year horizons.
  *  3. Properties and invariants the spec implies.
+ *
+ * Household size (`earners`, 1 or 2 adults each earning `salary`): the
+ * reference follows the spec: take-home = earners × takeHomePay(salary) (tax
+ * and NI per person), ISA allowance £20,000 × earners, CGT exemption £3,000 ×
+ * earners, Rent-a-Room £7,500 per home whatever earners is.
  */
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULTS,
+  USER_EXAMPLE,
   breakevenHouseGrowth,
   project,
   summarise,
@@ -25,10 +30,10 @@ import {
 // Independent reference implementation of the spec
 // ---------------------------------------------------------------------------
 
-/** Section 1: SDLT, England, from 1 April 2025, rounded to nearest pound. */
+/** Section 1: SDLT, England, from 1 April 2025, rounded DOWN to the pound (spec). */
 function refStampDuty(price: number, ftb: boolean): number {
   if (ftb && price <= 500_000) {
-    return Math.round(Math.max(0, price - 300_000) * 0.05);
+    return Math.floor(Math.max(0, price - 300_000) * 0.05);
   }
   const bands: [number, number][] = [
     [125_000, 0],
@@ -43,12 +48,12 @@ function refStampDuty(price: number, ftb: boolean): number {
     if (price > lower) tax += (Math.min(price, upper) - lower) * rate;
     lower = upper;
   }
-  return Math.round(tax);
+  return Math.floor(tax);
 }
 
-/** Section 1: personal allowance with the £1-per-£2 taper above £100k. */
+/** Section 1: personal allowance, reduced £1 for every WHOLE £2 above £100k. */
 function refPersonalAllowance(gross: number): number {
-  return Math.max(0, 12_570 - Math.max(0, gross - 100_000) / 2);
+  return Math.max(0, 12_570 - Math.floor(Math.max(0, gross - 100_000) / 2));
 }
 
 function refIncomeTax(gross: number): number {
@@ -94,9 +99,20 @@ function refRentARoomTax(annual: number, marginalPct: number): number {
   return Math.max(0, annual - 7_500) * (marginalPct / 100);
 }
 
-/** CGT if the GIA were sold in one tax year, £3,000 exemption. */
-function refCgt(value: number, basis: number, ratePct: number): number {
-  return Math.max(0, (value - basis - 3_000) * (ratePct / 100));
+/** CGT if the GIA were sold in one tax year, £3,000 exemption per adult. */
+function refCgt(value: number, basis: number, ratePct: number, people = 1): number {
+  return Math.max(0, (value - basis - 3_000 * people) * (ratePct / 100));
+}
+
+/**
+ * Household size. The spec makes `earners` a required input (1 or 2); the
+ * `?? 1` only keeps the single-earner comparisons meaningful if an older
+ * Inputs object lacks the field. A separate test pins USER_EXAMPLE.earners = 1.
+ */
+function refEarners(i: Inputs): number {
+  const e = (i as Partial<Inputs> & { earners?: number }).earners ?? 1;
+  if (e !== 1 && e !== 2) throw new Error(`earners must be 1 or 2, got ${e}`);
+  return e;
 }
 
 interface Pot {
@@ -140,8 +156,8 @@ function applyFlow(p: Pot, flow: number, useIsa: boolean): void {
   }
 }
 
-function potValue(p: Pot, cgtRate: number): number {
-  return p.isa + p.gia - refCgt(p.gia, p.basis, cgtRate) - p.shortfall;
+function potValue(p: Pot, cgtRate: number, people: number): number {
+  return p.isa + p.gia - refCgt(p.gia, p.basis, cgtRate, people) - p.shortfall;
 }
 
 interface RefRow {
@@ -168,8 +184,12 @@ function refProject(i: Inputs) {
   const loan = Math.max(0, i.price - i.deposit);
   const stampDuty = refStampDuty(i.price, i.firstTimeBuyer);
   const cashNeeded = i.deposit + stampDuty + i.purchaseFees;
-  const takeHome = refTakeHome(i.salary);
+  const earners = refEarners(i);
+  // Tax and NI are per person: household take-home = earners × single take-home.
+  const takeHome = earners * refTakeHome(i.salary);
+  // Rent-a-Room tax uses the (per-person) marginal rate of the starting salary.
   const marginal = refMarginal(i.salary);
+  const isaAllowance = 20_000 * earners;
   const monthlyRate = i.mortgageRate / 100 / 12;
   const repayment = i.mortgageType === "repayment";
   const payment = refPayment(loan, i.mortgageRate, i.mortgageTerm);
@@ -177,8 +197,8 @@ function refProject(i: Inputs) {
   const stockM = Math.pow(1 + i.stockReturn / 100, 1 / 12) - 1;
   const houseM = Math.pow(1 + i.houseGrowth / 100, 1 / 12) - 1;
 
-  const renter: Pot = { isa: cashNeeded, gia: 0, basis: 0, shortfall: 0, allowance: 20_000 };
-  const buyer: Pot = { isa: 0, gia: 0, basis: 0, shortfall: 0, allowance: 20_000 };
+  const renter: Pot = { isa: cashNeeded, gia: 0, basis: 0, shortfall: 0, allowance: isaAllowance };
+  const buyer: Pot = { isa: 0, gia: 0, basis: 0, shortfall: 0, allowance: isaAllowance };
   let value = i.price;
   let balance = loan;
   let renterRanDryYear: number | null = null;
@@ -186,8 +206,8 @@ function refProject(i: Inputs) {
   const totals = { rent: 0, interest: 0, capitalRepaid: 0, runningCosts: 0, lodgerIncome: 0 };
 
   const snapshot = (year: number, flows: Omit<RefRow, "year" | "renterPortfolio" | "renterNetWorth" | "propertyValue" | "mortgageBalance" | "equity" | "buyerPortfolio" | "buyerNetWorth" | "deflator">): RefRow => {
-    const renterPortfolio = potValue(renter, i.cgtRate);
-    const buyerPortfolio = potValue(buyer, i.cgtRate);
+    const renterPortfolio = potValue(renter, i.cgtRate, earners);
+    const buyerPortfolio = potValue(buyer, i.cgtRate, earners);
     const equity = value * (1 - i.sellingCostPct / 100) - balance;
     return {
       year,
@@ -207,12 +227,13 @@ function refProject(i: Inputs) {
   const rows: RefRow[] = [snapshot(0, zero)];
 
   for (let y = 0; y < i.years; y++) {
-    renter.allowance = 20_000;
-    buyer.allowance = 20_000;
+    renter.allowance = isaAllowance;
+    buyer.allowance = isaAllowance;
     const budgetYear = (takeHome - i.livingCosts) * Math.pow(1 + i.wageGrowth / 100, y);
     const budgetM = budgetYear / 12;
     const rentM = i.rent * Math.pow(1 + i.rentGrowth / 100, y);
     const lodgerGrossM = i.lodgerRent * Math.pow(1 + i.rentGrowth / 100, y);
+    // £7,500 allowance is per home, so the same whatever `earners` is.
     const lodgerNetYear = 12 * lodgerGrossM - refRentARoomTax(12 * lodgerGrossM, marginal);
     const lodgerM = lodgerNetYear / 12;
     const serviceM = (i.serviceCharge * Math.pow(1 + i.inflation / 100, y)) / 12;
@@ -308,7 +329,7 @@ function close(actual: number, expected: number, label = ""): void {
   }
 }
 
-const inp = (over: Partial<Inputs> = {}): Inputs => ({ ...DEFAULTS, ...over });
+const inp = (over: Partial<Inputs> = {}): Inputs => ({ ...USER_EXAMPLE, ...over });
 
 /** Everything that moves set to zero, 1-year horizon. */
 const FLAT: Partial<Inputs> = {
@@ -325,14 +346,17 @@ const FLAT: Partial<Inputs> = {
   lodgerRent: 0,
 };
 
-// Hand-derived constants for DEFAULTS (salary 90k, price 500k, deposit 95k, FTB):
+// Hand-derived constants for USER_EXAMPLE (salary 90k, price 500k, deposit 95k, FTB):
 //  Income tax: taxable 90,000 − 12,570 = 77,430 → 37,700×20% + 39,730×40% = 7,540 + 15,892 = 23,432
 //  NI: 37,700×8% + 39,730×2% = 3,016 + 794.60 = 3,810.60
 //  Take-home = 90,000 − 23,432 − 3,810.60 = 62,757.40
 //  Budget (year 0) = 62,757.40 − 13,000 = 49,757.40
 //  SDLT (FTB) = (500,000 − 300,000)×5% = 10,000; cashNeeded = 95,000 + 10,000 + 3,000 = 108,000
+//  Couple (earners 2, each on 90k): take-home 2 × 62,757.40 = 125,514.80;
+//  budget = 125,514.80 − 13,000 = 112,514.80 (living costs are per household).
 const TAKE_HOME_90K = 62_757.4;
 const BUDGET_DEFAULT = 49_757.4;
+const BUDGET_COUPLE_90K = 112_514.8;
 const CASH_NEEDED_DEFAULT = 108_000;
 const LOAN_DEFAULT = 405_000;
 
@@ -348,6 +372,29 @@ describe("reference model self-check (hand numbers)", () => {
     // Well-known figure: £100k over 25 years at 5% ≈ £584.59/month
     expect(refPayment(100_000, 5, 25)).toBeCloseTo(584.59, 2);
   });
+
+  it("household anchors (earners)", () => {
+    // 45k: tax (45,000 − 12,570) × 20% = 6,486; NI 32,430 × 8% = 2,594.40 → 35,919.60
+    close(refTakeHome(45_000), 35_919.6, "takeHome 45k");
+    // CGT: (50,000 − 30,000 − 2 × 3,000) × 24% = 14,000 × 0.24 = 3,360
+    close(refCgt(50_000, 30_000, 24, 2), 3_360, "cgt couple");
+    close(refCgt(50_000, 30_000, 24), 4_080, "cgt single");
+    const couple = refProject(inp({ ...FLAT, earners: 2 }));
+    close(couple.takeHome, 2 * TAKE_HOME_90K, "couple takeHome");
+    close(couple.rows[1].budget, BUDGET_COUPLE_90K, "couple budget");
+  });
+});
+
+describe("USER_EXAMPLE", () => {
+  it("is the fixed worked example in the spec table (single earner)", () => {
+    expect(USER_EXAMPLE).toMatchObject({
+      earners: 1, salary: 90_000, livingCosts: 13_000, wageGrowth: 3, incomeMultiple: 4.5,
+      price: 500_000, deposit: 95_000, firstTimeBuyer: true, purchaseFees: 3_000,
+      mortgageRate: 3, mortgageTerm: 30, mortgageType: "repayment", serviceCharge: 2_000,
+      maintenancePct: 0.5, lodgerRent: 0, sellingCostPct: 2, rent: 2_000, stockReturn: 7,
+      houseGrowth: 3, rentGrowth: 3, inflation: 2, useIsa: true, cgtRate: 24, years: 30,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -356,7 +403,7 @@ describe("reference model self-check (hand numbers)", () => {
 
 describe("upfrontCosts", () => {
   it("defaults", () => {
-    const u = upfrontCosts(DEFAULTS);
+    const u = upfrontCosts(USER_EXAMPLE);
     expect(u.loan).toBe(LOAN_DEFAULT);
     expect(u.stampDuty).toBe(10_000);
     expect(u.fees).toBe(3_000);
@@ -380,6 +427,18 @@ describe("upfrontCosts", () => {
     const u = upfrontCosts(inp({ price: 200_000, deposit: 250_000 }));
     expect(u.loan).toBe(0);
     expect(u.loanToValue).toBe(0);
+  });
+
+  it("couple: maxLoan = salary × earners × incomeMultiple; nothing else changes", () => {
+    const single = upfrontCosts(inp({ earners: 1 }));
+    const couple = upfrontCosts(inp({ earners: 2 }));
+    expect(single.maxLoan).toBe(405_000); // 90,000 × 1 × 4.5
+    expect(couple.maxLoan).toBe(810_000); // 90,000 × 2 × 4.5
+    expect(couple.loan).toBe(single.loan);
+    expect(couple.stampDuty).toBe(single.stampDuty);
+    expect(couple.fees).toBe(single.fees);
+    expect(couple.cashNeeded).toBe(single.cashNeeded);
+    expect(couple.loanToValue).toBe(single.loanToValue);
   });
 });
 
@@ -410,7 +469,27 @@ const SCENARIOS: [string, Partial<Inputs>][] = [
   }],
   ["cash buyer (deposit > price)", { price: 300_000, deposit: 320_000, years: 10 }],
   ["high earner with lodger at 45% rate", { salary: 200_000, lodgerRent: 1_500, years: 12 }],
+  // ---- couples (earners: 2) ----
+  ["couple: GIA builds above the £40k joint ISA allowance, £6k CGT exemption", { earners: 2 }],
+  ["couple, basic-rate: contributions between £20k and £40k a year", {
+    earners: 2, salary: 40_000, price: 350_000, deposit: 40_000, years: 20,
+  }],
+  ["couple builds GIA then sells it down", {
+    earners: 2, rent: 800, rentGrowth: 12, wageGrowth: 0, years: 25, stockReturn: 6,
+  }],
+  ["couple runs dry then recovers", {
+    earners: 2, salary: 30_000, rent: 7_000, rentGrowth: 0, wageGrowth: 8, stockReturn: 5, years: 25,
+  }],
+  ["couple at 45%, interest-only, lodger above the per-home Rent-a-Room limit", {
+    earners: 2, salary: 200_000, lodgerRent: 1_500, mortgageType: "interestOnly", years: 12,
+  }],
 ];
+
+const scenario = (name: string): Partial<Inputs> => {
+  const hit = SCENARIOS.find(([n]) => n === name);
+  if (!hit) throw new Error(`no scenario ${name}`);
+  return hit[1];
+};
 
 describe("project() matches an independent reference simulation of the spec", () => {
   for (const [name, over] of SCENARIOS) {
@@ -445,6 +524,27 @@ describe("project() matches an independent reference simulation of the spec", ()
     const r3 = refProject(inp(SCENARIOS[3][1]));
     expect(r3.rows[5].renterInvested).toBeGreaterThan(20_000);
     expect(r3.rows[25].renterInvested).toBeLessThan(0);
+  });
+
+  it("the couple scenarios exercise the earners-dependent branches", () => {
+    // Couple on 2 × 90k: renter puts 88,514.80 in during year 1 → well over £40k → GIA.
+    const c0 = refProject(inp(scenario("couple: GIA builds above the £40k joint ISA allowance, £6k CGT exemption")));
+    close(c0.rows[1].renterInvested, BUDGET_COUPLE_90K - 24_000, "couple renter flow");
+    // CGT with 6k vs 3k exemption must actually differ at the horizon.
+    const withCgt = refProject(inp({ earners: 2 })).rows[30].renterNetWorth;
+    const noCgt = refProject(inp({ earners: 2, cgtRate: 0 })).rows[30].renterNetWorth;
+    expect(noCgt - withCgt).toBeGreaterThan(0);
+    // Basic-rate couple: 2 × 32,319.60 − 13,000 − 24,000 = 27,639.20 in year 1 (between 20k and 40k).
+    const c1 = refProject(inp(scenario("couple, basic-rate: contributions between £20k and £40k a year")));
+    close(c1.rows[1].renterInvested, 27_639.2, "basic-rate couple renter flow");
+    expect(c1.rows[1].buyerInvested).toBeGreaterThan(20_000);
+    expect(c1.rows[1].buyerInvested).toBeLessThan(40_000);
+    const c2 = refProject(inp(scenario("couple builds GIA then sells it down")));
+    expect(c2.rows[5].renterInvested).toBeGreaterThan(40_000);
+    expect(c2.rows[25].renterInvested).toBeLessThan(0);
+    const c3 = refProject(inp(scenario("couple runs dry then recovers")));
+    expect(c3.renterRanDryYear).not.toBeNull();
+    expect(c3.rows[25].renterNetWorth).toBeGreaterThan(0);
   });
 });
 
@@ -611,7 +711,7 @@ describe("project(): mortgage", () => {
   });
 
   it("repayment: capital repaid in a year = drop in balance; interest = paid − capital", () => {
-    const p = project(DEFAULTS);
+    const p = project(USER_EXAMPLE);
     for (let n = 1; n <= 30; n++) {
       const capital = p.rows[n - 1].mortgageBalance - p.rows[n].mortgageBalance;
       close(p.rows[n].mortgagePaid - p.rows[n].interestPaid, capital, `y${n}`);
@@ -627,7 +727,7 @@ describe("project(): mortgage", () => {
       interest += b * r;
       b -= pmt - b * r;
     }
-    const p = project(DEFAULTS);
+    const p = project(USER_EXAMPLE);
     close(p.rows[1].interestPaid, interest, "interest");
     close(p.rows[1].mortgageBalance, b, "balance");
   });
@@ -753,8 +853,8 @@ describe("project(): totals", () => {
   });
 
   it("other outputs: upfront, takeHome", () => {
-    const p = project(DEFAULTS);
-    expect(p.upfront).toEqual(upfrontCosts(DEFAULTS));
+    const p = project(USER_EXAMPLE);
+    expect(p.upfront).toEqual(upfrontCosts(USER_EXAMPLE));
     close(p.takeHome, TAKE_HOME_90K, "takeHome");
   });
 });
@@ -765,7 +865,7 @@ describe("project(): totals", () => {
 
 describe("summarise", () => {
   it("nominal figures come from the last row", () => {
-    const p = project(DEFAULTS);
+    const p = project(USER_EXAMPLE);
     const last = p.rows[30];
     const s = summarise(p);
     close(s.finalRenter, last.renterNetWorth, "renter");
@@ -774,7 +874,7 @@ describe("summarise", () => {
   });
 
   it("real figures are nominal ÷ (1 + inflation)^years", () => {
-    const p = project(DEFAULTS);
+    const p = project(USER_EXAMPLE);
     const nom = summarise(p);
     const real = summarise(p, true);
     const d = 1.02 ** 30;
@@ -829,7 +929,7 @@ describe("breakevenHouseGrowth", () => {
   });
 
   it("agrees with a bisection on the reference model", () => {
-    const i = DEFAULTS;
+    const i = USER_EXAMPLE;
     const refDiff = (g: number) => {
       const last = refProject({ ...i, houseGrowth: g }).rows.at(-1)!;
       return last.buyerNetWorth - last.renterNetWorth;
@@ -890,8 +990,8 @@ describe("yearOneCosts", () => {
 
 describe("spec clarifications: yearOneCosts ignores the horizon", () => {
   it("returns the same year-one figures whatever years is set to", () => {
-    const one = yearOneCosts({ ...DEFAULTS, years: 1 });
-    expect(yearOneCosts({ ...DEFAULTS, years: 30 })).toEqual(one);
-    expect(yearOneCosts({ ...DEFAULTS, years: 0 })).toEqual(one);
+    const one = yearOneCosts({ ...USER_EXAMPLE, years: 1 });
+    expect(yearOneCosts({ ...USER_EXAMPLE, years: 30 })).toEqual(one);
+    expect(yearOneCosts({ ...USER_EXAMPLE, years: 0 })).toEqual(one);
   });
 });
