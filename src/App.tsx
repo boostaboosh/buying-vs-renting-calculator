@@ -1,0 +1,587 @@
+import { useMemo, useState } from "react";
+import { Field, Segmented, Toggle } from "./components/Field";
+import { Legend, TwoLineChart, type SeriesPoint } from "./components/Charts";
+import { Tip, type TipContent } from "./components/Tip";
+import { yearsToSave } from "./lib/finance";
+import {
+  type Inputs,
+  type MortgageType,
+  breakevenHouseGrowth,
+  project,
+  summarise,
+  yearOneCosts,
+} from "./lib/projection";
+import { FIELD_HELP, PRESETS, type Preset, type PresetId } from "./lib/defaults";
+import { SOURCES, type SourceId } from "./lib/sources";
+import { SDLT_FTB_MAX_PRICE } from "./lib/uk";
+import { explain } from "./explain";
+import { gbp, gbpShort, pct } from "./format";
+
+const RATES = [3, 3.5, 4, 4.5, 5, 5.5, 6];
+const GROWTHS = [0, 1, 2, 3, 4, 5];
+const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
+
+function formatInput(k: keyof Inputs, v: Inputs[keyof Inputs]): string {
+  if (typeof v === "boolean") return v ? "on" : "off";
+  if (typeof v === "string") return v === "repayment" ? "repayment" : "interest-only";
+  if (["salary", "livingCosts", "price", "deposit", "purchaseFees", "serviceCharge", "lodgerRent", "rent"].includes(k))
+    return gbp(v);
+  if (k === "earners" || k === "years" || k === "mortgageTerm") return String(v);
+  if (k === "incomeMultiple") return `${v}×`;
+  return pct(v, 2).replace(/\.?0+%$/, "%");
+}
+
+export default function App() {
+  const [presetId, setPresetId] = useState<PresetId>("london");
+  const preset: Preset = PRESETS[presetId];
+  const [p, setP] = useState<Inputs>(preset.inputs);
+  const [real, setReal] = useState(true);
+  const set =
+    <K extends keyof Inputs>(k: K) =>
+    (v: Inputs[K]) =>
+      setP((prev) => ({ ...prev, [k]: v }));
+  const choosePreset = (id: PresetId) => {
+    setPresetId(id);
+    setP(PRESETS[id].inputs);
+  };
+
+  const proj = useMemo(() => project(p), [p]);
+  const summary = useMemo(() => summarise(proj, real), [proj, real]);
+  const breakeven = useMemo(() => breakevenHouseGrowth(p), [p]);
+  const y1 = useMemo(() => yearOneCosts(p), [p]);
+  const grid = useMemo(
+    () =>
+      RATES.map((rate) =>
+        GROWTHS.map((g) => summarise(project({ ...p, mortgageRate: rate, houseGrowth: g }), true).difference),
+      ),
+    [p],
+  );
+  const ex = explain({ p, proj, summary, real, breakeven, y1 });
+
+  /** The explanation for an input: what it is, its default here, and why. */
+  const fieldTip = (k: keyof Inputs, title: string): TipContent => {
+    const why = preset.why[k];
+    return {
+      title,
+      body: (
+        <>
+          <p>{FIELD_HELP[k]}</p>
+          <p>
+            <strong>Default: {formatInput(k, preset.inputs[k])}.</strong> {why?.text ?? ""}
+          </p>
+        </>
+      ),
+      sources: why?.sources,
+    };
+  };
+  const F = <K extends keyof Inputs>(k: K, label: string) => ({
+    label,
+    value: p[k] as number,
+    onChange: set(k) as (v: number) => void,
+    tip: fieldTip(k, label),
+  });
+
+  const { upfront, rows, totals } = proj;
+  const deflate = (n: number, year: number) => (real ? n / rows[year].deflator : n);
+  const wealth: SeriesPoint[] = rows.map((r) => ({
+    year: r.year,
+    buy: deflate(r.buyerNetWorth, r.year),
+    rent: deflate(r.renterNetWorth, r.year),
+  }));
+  const housingCost: SeriesPoint[] = rows.slice(1).map((r) => ({
+    year: r.year,
+    buy: deflate(r.mortgagePaid + r.runningCosts - r.lodgerIncome, r.year),
+    rent: deflate(r.rentPaid, r.year),
+  }));
+
+  const budget0 = proj.takeHome - p.livingCosts;
+  const renterSaving0 = budget0 - p.rent * 12;
+  const saveYears = yearsToSave(upfront.cashNeeded, renterSaving0, p.stockReturn);
+  const first = rows[1];
+  const lastRow = rows[rows.length - 1];
+  const buyWins = summary.difference >= 0;
+  const money = real ? "in today's money" : "in future pounds";
+  const ftb = p.firstTimeBuyer && p.price <= SDLT_FTB_MAX_PRICE;
+
+  const warnings: string[] = [];
+  if (upfront.loan > upfront.maxLoan)
+    warnings.push(
+      `The loan (${gbp(upfront.loan)}) is more than ${p.incomeMultiple}× household income (${gbp(upfront.maxLoan)}). Most lenders won't offer this. Raise the deposit to at least ${gbp(p.price - upfront.maxLoan)}.`,
+    );
+  if (upfront.loanToValue > 95) warnings.push("A deposit under 5% is rarely mortgageable.");
+  if (p.firstTimeBuyer && p.price > SDLT_FTB_MAX_PRICE)
+    warnings.push(
+      `First-time buyer stamp duty relief only applies up to ${gbp(SDLT_FTB_MAX_PRICE)}. Above that you pay standard rates on the whole price.`,
+    );
+  if (renterSaving0 < 0)
+    warnings.push(
+      `Rent (${gbp(p.rent * 12)} a year) is more than the ${gbp(budget0)} left after living costs, so the renter has to sell investments from day one.`,
+    );
+  if (proj.renterRanDryYear)
+    warnings.push(
+      `Renting: the renter's investments run out in year ${proj.renterRanDryYear}. The shortfall after that is counted as debt.`,
+    );
+  if (proj.buyerRanDryYear)
+    warnings.push(
+      `Buying: the buyer's investments run out in year ${proj.buyerRanDryYear}. The shortfall after that is counted as debt.`,
+    );
+  if (p.mortgageType === "interestOnly")
+    warnings.push(
+      `Interest-only: you still owe the full ${gbp(upfront.loan)} at the end. It's repaid from the sale in this comparison. Lenders want a credible repayment plan.`,
+    );
+
+  const milestoneYears = [1, 5, 10, 15, 20, 25, 30, 40, 50].filter((y) => y < p.years).concat(p.years);
+  const flowYears = [1, Math.min(10, p.years), p.years].filter((y, i, a) => a.indexOf(y) === i);
+  const usedSources = Object.keys(SOURCES) as SourceId[];
+
+  return (
+    <div className="page">
+      <header className="masthead">
+        <p className="eyebrow">UK housing · rent vs buy</p>
+        <h1>Rent or buy, over the long run</h1>
+        <p className="lede">
+          Two households earn the same and spend the same. One buys; the other rents and invests the deposit. Each
+          month both put whatever is left after housing into a global index fund, for {p.years} years. Who ends up
+          richer? Hover over or tap any underlined figure to see what it is and where it comes from.
+        </p>
+      </header>
+
+      <div className="layout">
+        <aside className="inputs" aria-label="Assumptions">
+          <section>
+            <h2>Starting point</h2>
+            <div className="presets presets-stack" role="radiogroup" aria-label="Starting point">
+              {PRESET_IDS.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={presetId === id}
+                  className={presetId === id ? "on" : ""}
+                  onClick={() => choosePreset(id)}
+                >
+                  <strong>{PRESETS[id].label}</strong>
+                  <span>{PRESETS[id].summary}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2>Household</h2>
+            <Segmented<"1" | "2">
+              label="Earners"
+              tip={fieldTip("earners", "Earners")}
+              value={String(p.earners) as "1" | "2"}
+              onChange={(v) => set("earners")(Number(v))}
+              options={[
+                { value: "1", label: "One" },
+                { value: "2", label: "Two" },
+              ]}
+            />
+            <Field {...F("salary", p.earners === 2 ? "Gross salary, each" : "Gross salary")} unit="£" min={15_000} max={250_000} step={500}
+              hint={<>Take-home <Tip tip={ex.takeHome}>{gbp(proj.takeHome)}</Tip> a year{p.earners === 2 ? " for both" : ""}.</>} />
+            <Field {...F("livingCosts", "Living costs, excluding housing")} unit="£" min={0} max={80_000} step={500}
+              hint={<>Leaves <Tip tip={ex.budget(1)}><strong>{gbp(budget0)}</strong></Tip> a year for housing and investing.</>} />
+            <Field {...F("wageGrowth", "Pay growth")} unit="%" min={0} max={8} step={0.1} />
+          </section>
+
+          <section>
+            <h2>Buying</h2>
+            <Field {...F("price", "Property price")} unit="£" min={100_000} max={1_500_000} step={5_000} />
+            <Field {...F("deposit", "Deposit")} unit="£" min={0} max={Math.max(p.price, 100_000)} step={1_000}
+              hint={<>Loan <Tip tip={ex.deposit}>{gbp(upfront.loan)} ({pct(upfront.loanToValue, 0)} of the price)</Tip>. Lenders' cap: <Tip tip={ex.deposit}>{gbp(upfront.maxLoan)}</Tip>.</>} />
+            <Field {...F("mortgageRate", "Mortgage rate")} unit="%" min={0.5} max={9} step={0.05} />
+            <Segmented<MortgageType>
+              label="Mortgage type"
+              tip={fieldTip("mortgageType", "Mortgage type")}
+              value={p.mortgageType}
+              onChange={set("mortgageType")}
+              options={[
+                { value: "repayment", label: "Repayment" },
+                { value: "interestOnly", label: "Interest-only" },
+              ]}
+            />
+            <Field {...F("mortgageTerm", "Term")} unit="yrs" min={5} max={40} step={1}
+              hint={<><Tip tip={ex.monthlyMortgage}>{gbp(proj.monthlyMortgage)} a month</Tip>, fixed.</>} />
+            <Toggle label="First-time buyer" tip={fieldTip("firstTimeBuyer", "First-time buyer")} checked={p.firstTimeBuyer} onChange={set("firstTimeBuyer")}
+              hint={<>Stamp duty: <Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip>{p.firstTimeBuyer && !ftb ? " (no relief above £500,000)" : ""}.</>} />
+            <Field {...F("purchaseFees", "Legal, survey & mortgage fees")} unit="£" min={0} max={15_000} step={250} />
+            <Field {...F("serviceCharge", "Service charge, ground rent & insurance")} unit="£" min={0} max={10_000} step={20} />
+            <Field {...F("maintenancePct", "Maintenance")} unit="%" min={0} max={3} step={0.1} />
+            <Field {...F("lodgerRent", "Lodger income")} unit="£" min={0} max={1_500} step={25} />
+            <Field {...F("sellingCostPct", "Cost of selling")} unit="%" min={0} max={5} step={0.25} />
+          </section>
+
+          <section>
+            <h2>Renting</h2>
+            <Field {...F("rent", "Rent per month")} unit="£" min={300} max={6_000} step={1} />
+            <div className="presets" role="group" aria-label="Rent examples">
+              {preset.rentOptions.map((o) => (
+                <Tip key={o.label} tip={{ title: o.label, body: <p>{o.why}</p>, sources: o.sources }} className="chip-tip">
+                  <span className="chip" onClick={() => set("rent")(o.value)}>
+                    {o.label} · {gbp(o.value)}
+                  </span>
+                </Tip>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2>Markets</h2>
+            <Field {...F("stockReturn", "Investment return")} unit="%" min={0} max={12} step={0.1}
+              hint={<>After inflation: {pct(((1 + p.stockReturn / 100) / (1 + p.inflation / 100) - 1) * 100)}.</>} />
+            <Field {...F("houseGrowth", "House price growth")} unit="%" min={-3} max={8} step={0.1} />
+            <Field {...F("rentGrowth", "Rent growth")} unit="%" min={0} max={8} step={0.1} />
+            <Field {...F("inflation", "Inflation")} unit="%" min={0} max={8} step={0.1} />
+            <Field {...F("years", "Years to compare")} unit="yrs" min={3} max={60} step={1} />
+          </section>
+
+          <section>
+            <h2>Tax on investments</h2>
+            <Toggle label="ISA first, then taxable account" tip={fieldTip("useIsa", "ISA first, then taxable account")} checked={p.useIsa} onChange={set("useIsa")} />
+            <Field {...F("cgtRate", "Capital gains tax rate")} unit="%" min={0} max={24} step={1} />
+            <Field {...F("incomeMultiple", "Lender's income multiple")} unit="×" min={3} max={6} step={0.1} />
+          </section>
+
+          <button type="button" className="reset" onClick={() => setP(preset.inputs)}>
+            Reset to “{preset.label}”
+          </button>
+        </aside>
+
+        <main className="results">
+          <section className="verdict" aria-live="polite">
+            <div className="verdict-top">
+              <p className={`pill ${buyWins ? "pill-buy" : "pill-rent"}`}>{buyWins ? "Buying wins" : "Renting wins"}</p>
+              <Segmented<"real" | "nominal">
+                label="Show amounts"
+                value={real ? "real" : "nominal"}
+                onChange={(v) => setReal(v === "real")}
+                options={[
+                  { value: "real", label: "Today's money" },
+                  { value: "nominal", label: "Future pounds" },
+                ]}
+              />
+            </div>
+            <h2 className="headline">
+              After {p.years} years, {buyWins ? "buying" : "renting"} leaves you{" "}
+              <Tip tip={ex.headline} className="num">{gbpShort(Math.abs(summary.difference))}</Tip> better off{" "}
+              <span className="muted">{money}</span>.
+            </h2>
+            <div className="kpis">
+              <div className="kpi">
+                <span className="kpi-label"><span className="key key-buy" /> Buyer's net worth</span>
+                <Tip tip={ex.buyerNetWorth} className="kpi-value">{gbpShort(summary.finalBuyer)}</Tip>
+                <span className="kpi-note">Home {gbpShort(deflate(lastRow.equity, p.years))} + investments {gbpShort(deflate(lastRow.buyerPortfolio, p.years))}</span>
+              </div>
+              <div className="kpi">
+                <span className="kpi-label"><span className="key key-rent" /> Renter's net worth</span>
+                <Tip tip={ex.renterNetWorth} className="kpi-value">{gbpShort(summary.finalRenter)}</Tip>
+                <span className="kpi-note">All investments, after tax</span>
+              </div>
+              <div className="kpi">
+                <span className="kpi-label">Buying pulls ahead</span>
+                <Tip tip={ex.crossover} className="kpi-value">{summary.crossoverYear ? `Year ${summary.crossoverYear}` : "Never"}</Tip>
+                <span className="kpi-note">After stamp duty, fees and selling costs</span>
+              </div>
+              <div className="kpi">
+                <span className="kpi-label">Break-even house growth</span>
+                <Tip tip={ex.breakeven} className="kpi-value">{breakeven == null ? "n/a" : pct(breakeven)}</Tip>
+                <span className="kpi-note">
+                  {breakeven == null ? "Outside −10% to 20% a year" : `Buying wins above this. You assumed ${pct(p.houseGrowth)}.`}
+                </span>
+              </div>
+            </div>
+            {warnings.length > 0 && (
+              <ul className="warnings">
+                {warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Net worth over time</h2>
+              <Legend />
+            </div>
+            <p className="sub">
+              Buyer: home value minus mortgage and selling costs, plus investments. Renter: investments. Both after tax,{" "}
+              {money}.
+            </p>
+            <TwoLineChart
+              data={wealth}
+              crossover={summary.crossoverYear}
+              ariaLabel={`Net worth over ${p.years} years. Buyer ends at ${gbp(summary.finalBuyer)}, renter at ${gbp(summary.finalRenter)}.`}
+            />
+          </section>
+
+          <section className="card">
+            <h2>The sum most people stop at</h2>
+            <p className="sub">
+              Only part of a mortgage payment is a cost. Paying off capital is saving. Compare rent with the money
+              owning <em>loses</em> each year. Year one:
+            </p>
+            <div className="ledger-pair">
+              <table className="ledger">
+                <caption><span className="key key-rent" /> Renting</caption>
+                <tbody>
+                  <tr><th>Rent</th><td><Tip tip={ex.y1Rent}>{gbp(y1.rent)}</Tip></td></tr>
+                  <tr className="total"><th>Money gone</th><td><Tip tip={ex.y1Rent}>{gbp(y1.rent)}</Tip></td></tr>
+                </tbody>
+              </table>
+              <table className="ledger">
+                <caption><span className="key key-buy" /> Owning</caption>
+                <tbody>
+                  <tr><th>Mortgage interest</th><td><Tip tip={ex.y1Interest}>{gbp(y1.interest)}</Tip></td></tr>
+                  <tr><th>Service charge &amp; maintenance</th><td><Tip tip={ex.y1Running}>{gbp(y1.runningCosts)}</Tip></td></tr>
+                  {y1.lodgerIncome > 0 && <tr><th>Lodger income, after tax</th><td><Tip tip={ex.y1Lodger}>−{gbp(y1.lodgerIncome)}</Tip></td></tr>}
+                  <tr><th>Lost returns on the {gbp(upfront.cashNeeded)} spent buying</th><td><Tip tip={ex.y1Opportunity}>{gbp(y1.opportunityCost)}</Tip></td></tr>
+                  <tr><th>Expected rise in the home's value</th><td><Tip tip={ex.y1Growth}>−{gbp(y1.expectedGrowth)}</Tip></td></tr>
+                  <tr className="total"><th>Money gone</th><td><Tip tip={ex.y1BuyTotal}>{gbp(y1.buyTotal)}</Tip></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="note">
+              Also paid once: stamp duty <Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip> and fees{" "}
+              <Tip tip={ex.fees}>{gbp(upfront.fees)}</Tip> when buying, and about {pct(p.sellingCostPct, 1)} of the price
+              when selling. The repayment mortgage costs <Tip tip={ex.monthlyMortgage}>{gbp(proj.monthlyMortgage * 12)}</Tip>{" "}
+              a year in cash, but <Tip tip={ex.housingCost(1, "buy")}>{gbp(first.mortgagePaid - first.interestPaid)}</Tip>{" "}
+              of year one's payments reduce the loan and stay yours.
+            </p>
+          </section>
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Housing cost each year</h2>
+              <Legend />
+            </div>
+            <p className="sub">
+              Rent rises every year. A fixed-rate mortgage payment doesn't, and it stops once the loan is paid off.
+              Owning includes service charge and maintenance, less lodger income. Each household invests whatever its
+              housing leaves of the same money for housing and investing. {real ? "In today's money." : "In future pounds."}
+            </p>
+            <TwoLineChart
+              data={housingCost}
+              height={240}
+              ariaLabel="Yearly housing cost of renting versus owning"
+              footer={(r) => `${r.rent >= r.buy ? "Owning" : "Renting"} is ${gbp(Math.abs(r.rent - r.buy))} cheaper`}
+            />
+            <div className="scroll">
+              <table className="flows">
+                <thead>
+                  <tr>
+                    <th scope="col">Year</th>
+                    <th scope="col">
+                      <Tip tip={ex.budget(1)}>Money for housing and investing</Tip>
+                    </th>
+                    <th scope="col"><span className="key key-rent" /> Renter</th>
+                    <th scope="col"><span className="key key-buy" /> Buyer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flowYears.map((y) => {
+                    const r = rows[y];
+                    const buyCost = r.mortgagePaid + r.runningCosts - r.lodgerIncome;
+                    return (
+                      <tr key={y}>
+                        <th scope="row">{y}</th>
+                        <td><Tip tip={ex.budget(y)}>{gbp(deflate(r.budget, y))}</Tip></td>
+                        <td>
+                          <Tip tip={ex.housingCost(y, "rent")}>{gbp(deflate(r.rentPaid, y))}</Tip> on rent
+                          <br />
+                          <Tip tip={ex.invested(y, "rent")} className={r.renterInvested < 0 ? "neg" : ""}>{gbp(deflate(r.renterInvested, y))}</Tip> invested
+                        </td>
+                        <td>
+                          <Tip tip={ex.housingCost(y, "buy")}>{gbp(deflate(buyCost, y))}</Tip> on housing
+                          <br />
+                          <Tip tip={ex.invested(y, "buy")} className={r.buyerInvested < 0 ? "neg" : ""}>{gbp(deflate(r.buyerInvested, y))}</Tip> invested
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Getting to completion day</h2>
+            <dl className="facts">
+              <div><dt>Deposit</dt><dd><Tip tip={ex.deposit}>{gbp(p.deposit)}</Tip></dd></div>
+              <div><dt>Stamp duty{ftb ? " (first-time buyer)" : ""}</dt><dd><Tip tip={ex.stampDuty}>{gbp(upfront.stampDuty)}</Tip></dd></div>
+              <div><dt>Fees</dt><dd><Tip tip={ex.fees}>{gbp(upfront.fees)}</Tip></dd></div>
+              <div className="total"><dt>Cash needed</dt><dd><Tip tip={ex.cashNeeded}>{gbp(upfront.cashNeeded)}</Tip></dd></div>
+            </dl>
+            <p className="note">
+              {renterSaving0 > 0 && saveYears != null ? (
+                <>
+                  While renting at {gbp(p.rent)} a month you can save <Tip tip={ex.savingRate}>{gbp(renterSaving0)}</Tip> a
+                  year, so this takes about <Tip tip={ex.yearsToSave}><strong>{saveYears.toFixed(1)} years</strong></Tip>.{" "}
+                </>
+              ) : (
+                <>At this rent you can't save anything towards a deposit. </>
+              )}
+              Both households are identical until then, so the comparison starts on completion day. The renter keeps the
+              same {gbp(upfront.cashNeeded)} invested.
+            </p>
+          </section>
+
+          <section className="card">
+            <h2>What if the rate or house prices differ?</h2>
+            <p className="sub">
+              Buyer minus renter after {p.years} years, in today's money, keeping all your other inputs. Blue means
+              buying wins; orange means renting wins. Your current inputs are outlined.
+            </p>
+            <div className="scroll">
+              <table className="grid">
+                <thead>
+                  <tr>
+                    <th scope="col" className="corner">Mortgage rate ↓ · house growth →</th>
+                    {GROWTHS.map((g) => (
+                      <th scope="col" key={g}>{pct(g, 0)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {RATES.map((rate, i) => (
+                    <tr key={rate}>
+                      <th scope="row">{pct(rate, 1)}</th>
+                      {grid[i].map((d, j) => {
+                        const strength = Math.min(1, Math.abs(d) / 750_000);
+                        const isYou = rate === p.mortgageRate && GROWTHS[j] === p.houseGrowth;
+                        return (
+                          <td
+                            key={j}
+                            className={isYou ? "you" : ""}
+                            style={{
+                              background: `color-mix(in oklab, var(${d >= 0 ? "--buy" : "--rent"}) ${Math.round(8 + strength * 42)}%, var(--surface))`,
+                            }}
+                          >
+                            <Tip
+                              tip={{
+                                title: `${pct(rate, 1)} mortgage, ${pct(GROWTHS[j], 0)} house growth`,
+                                body: (
+                                  <p>
+                                    With every other input as you've set it, {d >= 0 ? "buying" : "renting"} finishes{" "}
+                                    {gbp(Math.abs(d))} ahead after {p.years} years, in today's money.
+                                  </p>
+                                ),
+                              }}
+                            >
+                              <span className="grid-who">{d >= 0 ? "Buy" : "Rent"}</span> +{gbpShort(Math.abs(d))}
+                            </Tip>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Year by year</h2>
+            <p className="sub">{real ? "In today's money." : "In future pounds."} Hover over a column heading for what it means.</p>
+            <div className="scroll">
+              <table className="milestones">
+                <thead>
+                  <tr>
+                    <th scope="col">Year</th>
+                    <th scope="col"><Tip tip={{ title: "Home value", body: <p>The price grown at {pct(p.houseGrowth)} a year.</p>, sources: ["ukhpi"] }}>Home value</Tip></th>
+                    <th scope="col"><Tip tip={{ title: "Mortgage left", body: <p>The loan still owed at the end of the year.</p> }}>Mortgage left</Tip></th>
+                    <th scope="col"><Tip tip={{ title: "Buyer's investments", body: <p>What the buyer has invested from money left over after housing, after capital gains tax if sold.</p> }}>Buyer's investments</Tip></th>
+                    <th scope="col"><Tip tip={ex.buyerNetWorth}>Buyer net worth</Tip></th>
+                    <th scope="col"><Tip tip={ex.renterNetWorth}>Renter net worth</Tip></th>
+                    <th scope="col"><Tip tip={{ title: "Difference", body: <p>Buyer's net worth minus renter's. “Buy +” means the buyer is ahead.</p> }}>Difference</Tip></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {milestoneYears.map((y) => {
+                    const r = rows[y];
+                    const diff = deflate(r.buyerNetWorth - r.renterNetWorth, y);
+                    return (
+                      <tr key={y}>
+                        <th scope="row">{y}</th>
+                        <td>{gbp(deflate(r.propertyValue, y))}</td>
+                        <td>{gbp(deflate(r.mortgageBalance, y))}</td>
+                        <td>{gbp(deflate(r.buyerPortfolio, y))}</td>
+                        <td>{gbp(deflate(r.buyerNetWorth, y))}</td>
+                        <td>{gbp(deflate(r.renterNetWorth, y))}</td>
+                        <td>{diff >= 0 ? "Buy +" : "Rent +"}{gbp(Math.abs(diff))}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="note">
+              Totals over {p.years} years in future pounds: rent paid {gbp(totals.rent)}; mortgage interest{" "}
+              {gbp(totals.interest)}; service charge and maintenance {gbp(totals.runningCosts)}; stamp duty and fees{" "}
+              {gbp(totals.purchaseCosts)}; selling costs {gbp(totals.sellingCosts)}.
+            </p>
+          </section>
+
+          <section className="card prose">
+            <h2>How the comparison works</h2>
+            <ul>
+              <li>
+                <strong>Same money, different housing.</strong> Each year both households have the same money for housing
+                and investing: take-home pay minus living costs, rising with pay. Whatever housing doesn't use is
+                invested. If housing costs more, investments are sold to cover it.
+              </li>
+              <li>
+                <strong>The renter keeps the deposit invested.</strong> The buyer's deposit, stamp duty and fees become
+                the renter's starting investments. Forgetting this lost return is why buying looks so much cheaper in the
+                quick sum.
+              </li>
+              <li>
+                <strong>Leverage.</strong> The buyer puts down {gbp(p.deposit)} but gets the growth on a {gbp(p.price)}{" "}
+                home. The effect shrinks as the loan is paid off and the renter's investments grow.
+              </li>
+              <li>
+                <strong>Fixed mortgage, rising rent.</strong> The mortgage payment is set on day one. Rent grows at{" "}
+                {pct(p.rentGrowth)} a year, so owning gets cheaper each year in today's money and renting doesn't.
+              </li>
+              <li>
+                <strong>Tax.</strong> Your main home is free of capital gains tax. Investments go into ISAs first (£20,000
+                a year per adult). Anything above that is taxed at {pct(p.cgtRate, 0)} on gains above £3,000 per adult
+                when sold. Dividend tax isn't modelled.
+              </li>
+              <li>
+                <strong>Risk isn't in the numbers.</strong> These are steady averages. Markets crash, and rates change
+                when you remortgage every 2 to 5 years. The buyer has one leveraged, hard-to-sell asset. The renter has
+                a diversified portfolio, but faces rent rises and moves.
+              </li>
+              <li>
+                <strong>Simplifications.</strong> One mortgage rate for the whole term, no pensions, and England, Wales and
+                Northern Ireland tax rules.
+              </li>
+            </ul>
+          </section>
+
+          <section className="card prose" id="sources">
+            <h2>Sources</h2>
+            <p className="sub">
+              Where the starting values and tax rules come from. Figures checked September 2026. Anything not listed here
+              (fees, selling costs, maintenance, term) is a stated assumption; hover over its input for the reasoning.
+            </p>
+            <ul className="source-list">
+              {usedSources.map((id) => (
+                <li key={id}>
+                  <a href={SOURCES[id].url} target="_blank" rel="noreferrer">
+                    {SOURCES[id].publisher}: {SOURCES[id].title}
+                  </a>
+                  <span>{SOURCES[id].figures}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="note">This is a model, not financial advice.</p>
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
