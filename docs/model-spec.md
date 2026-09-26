@@ -178,6 +178,13 @@ there are `years + 1` rows. Each row has:
   `runningCosts` (service charge + maintenance), `lodgerIncome` (net of tax),
   `renterInvested` and `buyerInvested` (the signed net flows), and `budget`. These
   are all 0 on row 0.
+- Growth that year, which shows leverage against compounding (all 0 on row 0):
+  - `houseGain`: the property value at the end of the year minus at the start.
+    The buyer gets this on the whole price, though they only put down the deposit.
+  - `renterInvestmentGain` and `buyerInvestmentGain`: the investment growth
+    earned that year, before tax. For each month: (ISA + GIA after that month's
+    flow) × the monthly stock rate, summed over the 12 months. New money paid in
+    isn't growth.
 - `deflator = (1 + inflation/100)^year`. Divide a nominal amount by it to get
   today's money.
 
@@ -199,6 +206,11 @@ Field names: row fields are named as above, plus `year`. `totals` has `rent`,
 From the last row: `finalRenter`, `finalBuyer`, and `difference` (buyer − renter).
 All are divided by that row's deflator when `real` is true. `crossoverYear` is the
 first year ≥ 1 where buyer net worth ≥ renter net worth, else null.
+
+### `compoundingOvertakesYear(projection)`
+The first year ≥ 1 in which the renter's investment growth is at least the home's
+price gain (`renterInvestmentGain ≥ houseGain`), else null. Before this, leverage
+earns the buyer more each year; after it, the renter's compounding does.
 
 ### `breakevenHouseGrowth(inputs)`
 The `houseGrowth` at which the nominal `difference` at the horizon is 0. Rent

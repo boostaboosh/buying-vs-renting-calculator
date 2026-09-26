@@ -52,7 +52,8 @@ function ChartTooltip({
   payload,
   label,
   footer,
-}: TooltipContentProps<number, string> & { footer: Footer }) {
+  names,
+}: TooltipContentProps<number, string> & { footer: Footer; names: Names }) {
   if (!active || !payload?.length) return null;
   const row = payload[0].payload as SeriesPoint;
   return (
@@ -61,26 +62,33 @@ function ChartTooltip({
       <div className="tip-row">
         <span className="key key-buy" />
         <strong>{gbp(row.buy)}</strong>
-        <span>Buy</span>
+        <span>{names.buy}</span>
       </div>
       <div className="tip-row">
         <span className="key key-rent" />
         <strong>{gbp(row.rent)}</strong>
-        <span>Rent</span>
+        <span>{names.rent}</span>
       </div>
       <div className="tip-foot">{footer(row)}</div>
     </div>
   );
 }
 
-export function Legend() {
+/** Series names; "Buy" and "Rent" unless a chart plots something more specific. */
+export interface Names {
+  buy: string;
+  rent: string;
+}
+const DEFAULT_NAMES: Names = { buy: "Buy", rent: "Rent" };
+
+export function Legend({ names = DEFAULT_NAMES }: { names?: Names }) {
   return (
     <div className="legend" aria-hidden="true">
       <span>
-        <span className="key key-buy" /> Buy
+        <span className="key key-buy" /> {names.buy}
       </span>
       <span>
-        <span className="key key-rent" /> Rent
+        <span className="key key-rent" /> {names.rent}
       </span>
     </div>
   );
@@ -92,12 +100,17 @@ export function TwoLineChart({
   crossover,
   height = 300,
   footer = wealthFooter,
+  names = DEFAULT_NAMES,
+  marker,
 }: {
   data: SeriesPoint[];
   ariaLabel: string;
   crossover?: number | null;
   height?: number;
   footer?: Footer;
+  names?: Names;
+  /** An extra labelled vertical line, e.g. the year one series overtakes the other. */
+  marker?: { x: number; label: string } | null;
 }) {
   const c = usePalette();
   const axis = { fill: c["--ink-3"], fontSize: 12, fontFamily: "var(--mono)" };
@@ -130,6 +143,13 @@ export function TwoLineChart({
             tickFormatter={gbpShort}
             width={56}
           />
+          {marker && (
+            <ReferenceLine
+              x={marker.x}
+              stroke={c["--ink-3"]}
+              label={{ value: marker.label, position: "insideTopLeft", fill: c["--ink-2"], fontSize: 12 }}
+            />
+          )}
           {crossover != null && crossover > 0 && (
             <ReferenceLine
               x={crossover}
@@ -139,14 +159,14 @@ export function TwoLineChart({
             />
           )}
           <Tooltip
-            content={(props) => <ChartTooltip {...(props as TooltipContentProps<number, string>)} footer={footer} />}
+            content={(props) => <ChartTooltip {...(props as TooltipContentProps<number, string>)} footer={footer} names={names} />}
             cursor={{ stroke: c["--ink-3"], strokeWidth: 1 }}
             isAnimationActive={false}
           />
           <Line
             type="monotone"
             dataKey="rent"
-            name="Rent"
+            name={names.rent}
             stroke={c["--rent"]}
             strokeWidth={2}
             dot={endDot(c["--rent"])}
@@ -156,7 +176,7 @@ export function TwoLineChart({
           <Line
             type="monotone"
             dataKey="buy"
-            name="Buy"
+            name={names.buy}
             stroke={c["--buy"]}
             strokeWidth={2}
             dot={endDot(c["--buy"])}
