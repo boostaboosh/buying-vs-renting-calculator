@@ -178,11 +178,11 @@ describe("stampDuty — standard rates (England, from 1 April 2025)", () => {
     expect(stampDuty(2_000_000, false)).toBe(153_750);
   });
 
-  it("rounds to the nearest pound", () => {
+  it("rounds down to the whole pound (spec updated from 'nearest pound')", () => {
     expect(stampDuty(125_020, false)).toBe(0); // 20 × 2% = 0.40 → 0
-    expect(stampDuty(125_030, false)).toBe(1); // 30 × 2% = 0.60 → 1
+    expect(stampDuty(125_030, false)).toBe(0); // 30 × 2% = 0.60 → 0
     expect(stampDuty(250_008, false)).toBe(2_500); // 2,500 + 8 × 5% = 2,500.40 → 2,500
-    expect(stampDuty(250_012, false)).toBe(2_501); // 2,500 + 12 × 5% = 2,500.60 → 2,501
+    expect(stampDuty(250_012, false)).toBe(2_500); // 2,500 + 12 × 5% = 2,500.60 → 2,500
   });
 
   it("always returns a whole number of pounds", () => {
@@ -611,5 +611,28 @@ describe("yearsToSave", () => {
     const low = yearsToSave(200_000, 15_000, 2)!;
     const high = yearsToSave(200_000, 15_000, 8)!;
     expect(high).toBeLessThanOrEqual(low);
+  });
+});
+
+// Clarifications added to docs/model-spec.md after the first contract pass.
+describe("spec clarifications: rounding and thresholds", () => {
+  it("rounds stamp duty down to the whole pound, as HMRC does", () => {
+    // Standard: (125,099 − 125,000) × 2% = £1.98 → £1
+    expect(stampDuty(125_099, false)).toBe(1);
+    // First-time buyer: (300,030 − 300,000) × 5% = £1.50 → £1
+    expect(stampDuty(300_030, true)).toBe(1);
+    // Exact amounts are unaffected: 125,000 × 2% = £2,500
+    expect(stampDuty(250_000, false)).toBe(2_500);
+  });
+
+  it("reduces the personal allowance by £1 per whole £2 over £100,000", () => {
+    // £1 over: no reduction, so only the extra £1 is taxed at 40%.
+    expect(incomeTax(100_001) - incomeTax(100_000)).toBeCloseTo(0.4, 6);
+    // £3 over: allowance falls by £1, so taxable income rises by £4 at 40%.
+    expect(incomeTax(100_003) - incomeTax(100_000)).toBeCloseTo(1.6, 6);
+  });
+
+  it("gives 45% as the marginal rate at exactly £125,140", () => {
+    expect(marginalTaxRate(125_140)).toBe(45);
   });
 });

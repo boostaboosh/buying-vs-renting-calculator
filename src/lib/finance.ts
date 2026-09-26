@@ -52,12 +52,14 @@ function banded(amount: number, bands: ReadonlyArray<readonly [number, number]>)
 
 /** Stamp duty (England) on a main residence, no additional-property surcharge. */
 export function stampDuty(price: number, firstTimeBuyer: boolean): number {
-  if (firstTimeBuyer && price <= SDLT_FTB_MAX_PRICE) return Math.round(banded(price, SDLT_FTB_BANDS));
-  return Math.round(banded(price, SDLT_STANDARD_BANDS));
+  const bands = firstTimeBuyer && price <= SDLT_FTB_MAX_PRICE ? SDLT_FTB_BANDS : SDLT_STANDARD_BANDS;
+  // HMRC rounds down to the pound; the small epsilon absorbs float error on exact amounts.
+  return Math.floor(banded(price, bands) + 1e-6);
 }
 
 function personalAllowance(gross: number): number {
-  const taper = Math.max(0, (gross - PA_TAPER_START) / 2);
+  // £1 off for every whole £2 over the threshold.
+  const taper = Math.max(0, Math.floor((gross - PA_TAPER_START) / 2));
   return Math.max(0, PERSONAL_ALLOWANCE - taper);
 }
 

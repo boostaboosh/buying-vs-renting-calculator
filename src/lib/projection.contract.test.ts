@@ -887,3 +887,11 @@ describe("yearOneCosts", () => {
     close(y.buyTotal, 7_000 + 5_400, "buyTotal");
   });
 });
+
+describe("spec clarifications: yearOneCosts ignores the horizon", () => {
+  it("returns the same year-one figures whatever years is set to", () => {
+    const one = yearOneCosts({ ...DEFAULTS, years: 1 });
+    expect(yearOneCosts({ ...DEFAULTS, years: 30 })).toEqual(one);
+    expect(yearOneCosts({ ...DEFAULTS, years: 0 })).toEqual(one);
+  });
+});

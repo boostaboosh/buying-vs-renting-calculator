@@ -21,7 +21,7 @@ linearly.
 
 ### `stampDuty(price, firstTimeBuyer): number`
 Stamp Duty Land Tax on a main residence in England, rates from 1 April 2025, no
-additional-property surcharge, rounded to the nearest pound.
+additional-property surcharge, rounded **down** to the whole pound (as HMRC does).
 - Standard bands: 0% up to £125,000; 2% £125,001 to £250,000; 5% £250,001 to
   £925,000; 10% £925,001 to £1.5m; 12% above £1.5m.
 - First-time buyer relief: 0% up to £300,000; 5% £300,001 to £500,000. It applies
@@ -30,8 +30,8 @@ additional-property surcharge, rounded to the nearest pound.
 
 ### `incomeTax(gross)`, `nationalInsurance(gross)`, `takeHomePay(gross)`
 Annual employee figures for England, Wales and Northern Ireland, 2025/26 tax year.
-- Personal allowance £12,570, reduced by £1 for every £2 of income above £100,000
-  (zero at £125,140 and above).
+- Personal allowance £12,570, reduced by £1 for every whole £2 of income above
+  £100,000, so an odd £1 over doesn't reduce it (zero at £125,140 and above).
 - Income tax: 20% on the first £37,700 of taxable income; 40% up to £125,140 of
   taxable income; 45% above that.
 - Employee Class 1 NI: 8% between £12,570 and £50,270; 2% above £50,270.
@@ -39,7 +39,8 @@ Annual employee figures for England, Wales and Northern Ireland, 2025/26 tax yea
 
 ### `marginalTaxRate(gross): number`
 Income tax rate, in whole percent, on the next pound earned: 0, 20, 40, 45, or 60
-in the personal allowance taper zone (£100,000 to £125,140).
+in the personal allowance taper zone (gross from £100,000 up to, but not including,
+£125,140). At exactly £125,140 the allowance is already gone, so the answer is 45.
 
 ### `rentARoomTax(annualLodgerIncome, marginalRatePct): number`
 Rent-a-Room scheme: the first £7,500 of gross annual receipts is tax-free. Receipts
@@ -107,7 +108,8 @@ portfolio.
   evenly over 12 months.
 - Rent per month: `rent × (1 + rentGrowth)^y`.
 - Lodger income per month: `lodgerRent × (1 + rentGrowth)^y`, minus Rent-a-Room
-  tax on 12 × that amount at `marginalTaxRate(salary)`, spread evenly.
+  tax on 12 × that amount at `marginalTaxRate(salary)`, spread evenly. The
+  marginal rate is taken from the starting salary and doesn't change with pay growth.
 - Service charge per month: `serviceCharge × (1 + inflation)^y / 12`.
 
 **Each month, in this order.**
@@ -130,6 +132,20 @@ portfolio.
      counts as debt and earns no interest.
 4. Both portfolios (ISA and GIA) grow by `(1 + stockReturn/100)^(1/12) − 1`.
 5. The property value grows by `(1 + houseGrowth/100)^(1/12) − 1`.
+
+So each month's flow is invested before that month's growth. Maintenance uses the
+property value before that month's growth.
+
+**Details of the investment rules.**
+- The renter's opening ISA balance was saved in earlier years. It doesn't use
+  any of year 0's £20,000 allowance.
+- Withdrawing from the ISA doesn't give back allowance. Money used to repay a
+  shortfall isn't an ISA contribution.
+- Selling GIA holdings to cover a negative flow doesn't trigger CGT at that
+  moment. CGT only appears in each row's figures, as if the whole GIA were sold
+  on that date.
+- A year counts as "ran dry" if the shortfall is above 0 at the end of that year.
+- "Within the term" means month index < `mortgageTerm × 12`.
 
 **Rows.** `rows[0]` is completion day and `rows[n]` is the end of year `n`, so
 there are `years + 1` rows. Each row has:
@@ -154,6 +170,10 @@ a shortfall, else null. `totals` has lifetime sums of rent, interest, capital
 repaid, running costs and net lodger income, plus `purchaseCosts` (stamp duty +
 fees) and `sellingCosts` (the final value × `sellingCostPct`).
 
+Field names: row fields are named as above, plus `year`. `totals` has `rent`,
+`interest`, `capitalRepaid`, `runningCosts`, `lodgerIncome`, `purchaseCosts` and
+`sellingCosts`.
+
 ### `summarise(projection, real = false)`
 From the last row: `finalRenter`, `finalBuyer`, and `difference` (buyer − renter).
 All are divided by that row's deflator when `real` is true. `crossoverYear` is the
@@ -161,11 +181,12 @@ first year ≥ 1 where buyer net worth ≥ renter net worth, else null.
 
 ### `breakevenHouseGrowth(inputs)`
 The `houseGrowth` at which the nominal `difference` at the horizon is 0, holding
-all other inputs fixed. Searches −10% to +20%. Returns null if the difference
-doesn't change sign in that range.
+all other inputs fixed. Searches −10% to +20% and is accurate to
+0.01 percentage points. Returns null if the difference doesn't change sign in that
+range.
 
 ### `yearOneCosts(inputs)`
-Year-one money that neither person gets back:
+Always looks at year one, whatever `years` is set to. Year-one money that neither person gets back:
 - `rent` = the renter's year-one rent.
 - `interest`, `runningCosts` and `lodgerIncome` = the buyer's year-one figures
   from the projection.
