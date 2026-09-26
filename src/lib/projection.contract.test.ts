@@ -14,6 +14,12 @@
  * reference follows the spec: take-home = earners × takeHomePay(salary) (tax
  * and NI per person), ISA allowance £20,000 × earners, CGT exemption £3,000 ×
  * earners, Rent-a-Room £7,500 per home whatever earners is.
+ *
+ * Remortgaging (`fixYears`, `followOnRate`): month m uses `mortgageRate` while
+ * m < fixYears × 12 and `followOnRate` after. A repayment mortgage's payment is
+ * reset at month fixYears × 12 (if still within the term) to
+ * mortgagePayment(balance then, followOnRate, mortgageTerm − fixYears).
+ * Interest-only pays interest at that month's rate.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -94,6 +100,17 @@ function refPayment(principal: number, ratePct: number, termYears: number): numb
   return (principal * r) / (1 - Math.pow(1 + r, -n));
 }
 
+/** Closed-form annuity balance after k payments; linear at 0%. 0 at/after the term. */
+function refRemaining(principal: number, ratePct: number, termYears: number, k: number): number {
+  const n = termYears * 12;
+  if (principal <= 0 || k >= n) return 0;
+  if (k <= 0) return principal;
+  const r = ratePct / 100 / 12;
+  if (r === 0) return principal * (1 - k / n);
+  const g = Math.pow(1 + r, k);
+  return principal * g - (refPayment(principal, ratePct, termYears) * (g - 1)) / r;
+}
+
 /** Rent-a-Room: first £7,500 of receipts tax free, rest at marginal rate. */
 function refRentARoomTax(annual: number, marginalPct: number): number {
   return Math.max(0, annual - 7_500) * (marginalPct / 100);
@@ -113,6 +130,16 @@ function refEarners(i: Inputs): number {
   const e = (i as Partial<Inputs> & { earners?: number }).earners ?? 1;
   if (e !== 1 && e !== 2) throw new Error(`earners must be 1 or 2, got ${e}`);
   return e;
+}
+
+/**
+ * Remortgage inputs. `?? mortgageTerm` / `?? mortgageRate` only keep the old
+ * "fixed for the whole term" meaning if an older Inputs object lacks the fields;
+ * a separate test pins USER_EXAMPLE.fixYears = 5 and followOnRate = 3.
+ */
+function refFix(i: Inputs): { fixYears: number; followOnRate: number } {
+  const x = i as Partial<Inputs> & { fixYears?: number; followOnRate?: number };
+  return { fixYears: x.fixYears ?? i.mortgageTerm, followOnRate: x.followOnRate ?? i.mortgageRate };
 }
 
 interface Pot {
@@ -190,10 +217,17 @@ function refProject(i: Inputs) {
   // Rent-a-Room tax uses the (per-person) marginal rate of the starting salary.
   const marginal = refMarginal(i.salary);
   const isaAllowance = 20_000 * earners;
-  const monthlyRate = i.mortgageRate / 100 / 12;
+  const { fixYears, followOnRate } = refFix(i);
+  const fixMonths = fixYears * 12;
   const repayment = i.mortgageType === "repayment";
   const payment = refPayment(loan, i.mortgageRate, i.mortgageTerm);
   const termMonths = i.mortgageTerm * 12;
+  // Payment after the fix, from the closed-form balance at month fixMonths.
+  // Equal to the starting payment when fixYears ≥ mortgageTerm (spec).
+  const followOnPayment = fixYears >= i.mortgageTerm
+    ? payment
+    : refPayment(refRemaining(loan, i.mortgageRate, i.mortgageTerm, fixMonths), followOnRate, i.mortgageTerm - fixYears);
+  let currentPayment = payment;
   const stockM = Math.pow(1 + i.stockReturn / 100, 1 / 12) - 1;
   const houseM = Math.pow(1 + i.houseGrowth / 100, 1 / 12) - 1;
 
@@ -241,15 +275,20 @@ function refProject(i: Inputs) {
     const f = { ...zero, budget: budgetYear };
     for (let m = 0; m < 12; m++) {
       const month = y * 12 + m;
-      // 1. mortgage
-      const interest = balance * monthlyRate;
+      // 1. mortgage: starting rate during the fix, follow-on rate from month fixMonths.
+      const ratePct = month < fixMonths ? i.mortgageRate : followOnRate;
+      if (repayment && month === fixMonths && month < termMonths) {
+        // Reset on the simulated balance and the remaining term.
+        currentPayment = refPayment(balance, followOnRate, i.mortgageTerm - fixYears);
+      }
+      const interest = (balance * ratePct) / 100 / 12;
       let paid = 0;
       let interestPaid = 0;
       if (repayment) {
         if (month < termMonths) {
-          paid = payment;
+          paid = currentPayment;
           interestPaid = interest;
-          balance -= payment - interest;
+          balance -= currentPayment - interest;
           if (month === termMonths - 1) balance = Math.max(0, balance);
         } else {
           balance = 0;
@@ -299,7 +338,10 @@ function refProject(i: Inputs) {
     stampDuty,
     takeHome,
     marginal,
-    monthlyMortgage: repayment ? payment : loan * monthlyRate,
+    monthlyMortgage: repayment ? payment : (loan * i.mortgageRate) / 100 / 12,
+    followOnMonthlyMortgage: repayment
+      ? followOnPayment
+      : (loan * (fixYears >= i.mortgageTerm ? i.mortgageRate : followOnRate)) / 100 / 12,
     renterRanDryYear,
     buyerRanDryYear,
     totals: {
@@ -336,6 +378,7 @@ const FLAT: Partial<Inputs> = {
   years: 1,
   wageGrowth: 0,
   mortgageRate: 0,
+  followOnRate: 0, // 0% after the fix too (only matters beyond fixYears)
   stockReturn: 0,
   houseGrowth: 0,
   rentGrowth: 0,
@@ -373,6 +416,22 @@ describe("reference model self-check (hand numbers)", () => {
     expect(refPayment(100_000, 5, 25)).toBeCloseTo(584.59, 2);
   });
 
+  it("remortgage anchors (hand numbers, standard annuity maths)", () => {
+    // £405k at 3% over 30 years: 1,707.50/month (1,707.4963…).
+    expect(refPayment(LOAN_DEFAULT, 3, 30)).toBeCloseTo(1_707.4963, 4);
+    // Balance after 60 payments: 405,000·1.0025^60 − 1,707.4963·(1.0025^60 − 1)/0.0025
+    //  = 360,070.77; reset at 6% over 25 years → 2,319.94/month.
+    expect(refRemaining(LOAN_DEFAULT, 3, 30, 60)).toBeCloseTo(360_070.7716, 3);
+    expect(refPayment(360_070.7716, 6, 25)).toBeCloseTo(2_319.941, 2);
+    // The reference's simulated reset agrees and clears the loan by the end of the term.
+    const r = refProject(inp({ followOnRate: 6 }));
+    close(r.followOnMonthlyMortgage, 2_319.941, "reset payment");
+    close(r.rows[5].mortgageBalance, 360_070.7716, "balance at the fix");
+    expect(Math.abs(r.rows[30].mortgageBalance)).toBeLessThan(0.01);
+    // Same rate before and after → reset payment equals the original one.
+    close(refProject(USER_EXAMPLE).followOnMonthlyMortgage, refPayment(LOAN_DEFAULT, 3, 30), "no change");
+  });
+
   it("household anchors (earners)", () => {
     // 45k: tax (45,000 − 12,570) × 20% = 6,486; NI 32,430 × 8% = 2,594.40 → 35,919.60
     close(refTakeHome(45_000), 35_919.6, "takeHome 45k");
@@ -390,7 +449,8 @@ describe("USER_EXAMPLE", () => {
     expect(USER_EXAMPLE).toMatchObject({
       earners: 1, salary: 90_000, livingCosts: 13_000, wageGrowth: 3, incomeMultiple: 4.5,
       price: 500_000, deposit: 95_000, firstTimeBuyer: true, purchaseFees: 3_000,
-      mortgageRate: 3, mortgageTerm: 30, mortgageType: "repayment", serviceCharge: 2_000,
+      mortgageRate: 3, fixYears: 5, followOnRate: 3,
+      mortgageTerm: 30, mortgageType: "repayment", serviceCharge: 2_000,
       maintenancePct: 0.5, lodgerRent: 0, sellingCostPct: 2, rent: 2_000, stockReturn: 7,
       houseGrowth: 3, rentGrowth: 3, inflation: 2, useIsa: true, cgtRate: 24, years: 30,
     });
@@ -465,7 +525,8 @@ const SCENARIOS: [string, Partial<Inputs>][] = [
     serviceCharge: 40_000, wageGrowth: 10, years: 20,
   }],
   ["falling house prices, 0% mortgage, short term ends inside horizon", {
-    houseGrowth: -2, mortgageRate: 0, mortgageTerm: 10, years: 15,
+    // followOnRate 0 keeps this a 0% mortgage for the whole term, as before the remortgage change.
+    houseGrowth: -2, mortgageRate: 0, followOnRate: 0, mortgageTerm: 10, years: 15,
   }],
   ["cash buyer (deposit > price)", { price: 300_000, deposit: 320_000, years: 10 }],
   ["high earner with lodger at 45% rate", { salary: 200_000, lodgerRent: 1_500, years: 12 }],
@@ -482,6 +543,41 @@ const SCENARIOS: [string, Partial<Inputs>][] = [
   }],
   ["couple at 45%, interest-only, lodger above the per-home Rent-a-Room limit", {
     earners: 2, salary: 200_000, lodgerRent: 1_500, mortgageType: "interestOnly", years: 12,
+  }],
+  // ---- remortgaging (fixYears / followOnRate) ----
+  ["remortgage: repayment, follow-on rate higher (3% → 6% after 5 years)", {
+    fixYears: 5, followOnRate: 6,
+  }],
+  ["remortgage: repayment, follow-on rate lower (5% → 2% after 2 years), term ends inside horizon", {
+    mortgageRate: 5, fixYears: 2, followOnRate: 2, mortgageTerm: 25, years: 30,
+  }],
+  ["remortgage: interest-only, follow-on rate higher (3% → 5.5% after 5 years)", {
+    mortgageType: "interestOnly", fixYears: 5, followOnRate: 5.5,
+  }],
+  ["remortgage: interest-only, follow-on rate lower (4% → 2% after 3 years), beyond the term", {
+    mortgageType: "interestOnly", mortgageRate: 4, fixYears: 3, followOnRate: 2, mortgageTerm: 25, years: 30,
+  }],
+  ["remortgage: repayment, fix longer than the term (follow-on rate never used)", {
+    fixYears: 35, followOnRate: 9, mortgageTerm: 25, years: 30,
+  }],
+  ["remortgage: repayment, fix equal to the term", {
+    fixYears: 25, followOnRate: 9, mortgageTerm: 25, years: 30,
+  }],
+  ["remortgage: fix ends exactly at the horizon (follow-on rate never used)", {
+    fixYears: 10, followOnRate: 8, years: 10,
+  }],
+  ["remortgage: interest-only, fix ends exactly at the horizon", {
+    mortgageType: "interestOnly", fixYears: 10, followOnRate: 8, years: 10,
+  }],
+  ["remortgage: 0% fix then 4%, buyer squeezed by the reset", {
+    mortgageRate: 0, fixYears: 5, followOnRate: 4, mortgageTerm: 10, years: 12,
+  }],
+  ["remortgage: 4% fix then 0% (equal instalments on the remaining balance)", {
+    mortgageRate: 4, fixYears: 3, followOnRate: 0, mortgageTerm: 15, years: 20,
+  }],
+  ["remortgage: couple, 2-year fix, follow-on higher, runs dry", {
+    // 2 × 25k: the reset to 9% pushes the buyer's flow negative from year 3.
+    earners: 2, salary: 25_000, fixYears: 2, followOnRate: 9, years: 15,
   }],
 ];
 
@@ -524,6 +620,36 @@ describe("project() matches an independent reference simulation of the spec", ()
     const r3 = refProject(inp(SCENARIOS[3][1]));
     expect(r3.rows[5].renterInvested).toBeGreaterThan(20_000);
     expect(r3.rows[25].renterInvested).toBeLessThan(0);
+  });
+
+  it("followOnMonthlyMortgage matches the reference in every scenario", () => {
+    for (const [name, over] of SCENARIOS) {
+      const i = inp(over);
+      close(project(i).followOnMonthlyMortgage, refProject(i).followOnMonthlyMortgage, `${name}: followOnMonthlyMortgage`);
+    }
+  });
+
+  it("the remortgage scenarios really exercise the new branches", () => {
+    // Higher follow-on: payment rises at the start of year 6, and the rows differ
+    // from a run with no rate change.
+    const hi = refProject(inp(scenario("remortgage: repayment, follow-on rate higher (3% → 6% after 5 years)")));
+    expect(hi.rows[6].mortgagePaid).toBeGreaterThan(hi.rows[5].mortgagePaid);
+    expect(hi.rows[30].buyerNetWorth).toBeLessThan(refProject(USER_EXAMPLE).rows[30].buyerNetWorth);
+    // Lower follow-on: payment falls after year 2.
+    const lo = refProject(inp(scenario("remortgage: repayment, follow-on rate lower (5% → 2% after 2 years), term ends inside horizon")));
+    expect(lo.rows[3].mortgagePaid).toBeLessThan(lo.rows[2].mortgagePaid);
+    expect(lo.rows[26].mortgagePaid).toBe(0);
+    // Interest-only: 405,000 × 3% = 12,150 then × 5.5% = 22,275 a year.
+    const io = refProject(inp(scenario("remortgage: interest-only, follow-on rate higher (3% → 5.5% after 5 years)")));
+    close(io.rows[5].interestPaid, 12_150, "IO y5");
+    close(io.rows[6].interestPaid, 22_275, "IO y6");
+    // Fix at the horizon: follow-on rate is never used in the rows.
+    const atH = refProject(inp(scenario("remortgage: fix ends exactly at the horizon (follow-on rate never used)")));
+    const same = refProject(inp({ years: 10 }));
+    atH.rows.forEach((r, n) => close(r.buyerNetWorth, same.rows[n].buyerNetWorth, `fix at horizon row ${n}`));
+    expect(atH.followOnMonthlyMortgage).toBeGreaterThan(atH.monthlyMortgage);
+    // Couple scenario really runs dry.
+    expect(refProject(inp(scenario("remortgage: couple, 2-year fix, follow-on higher, runs dry"))).buyerRanDryYear).not.toBeNull();
   });
 
   it("the couple scenarios exercise the earners-dependent branches", () => {
@@ -914,10 +1040,30 @@ describe("summarise", () => {
 // ---------------------------------------------------------------------------
 
 describe("breakevenHouseGrowth", () => {
-  const diffAt = (i: Inputs, g: number) => summarise(project({ ...i, houseGrowth: g })).difference;
+  // Spec (changed): when testing house growth g, rent growth is
+  // rentGrowth + (g − houseGrowth), so the chosen gap between them is kept.
+  const moved = (i: Inputs, g: number): Inputs =>
+    ({ ...i, houseGrowth: g, rentGrowth: i.rentGrowth + (g - i.houseGrowth) });
+  const diffAt = (i: Inputs, g: number) => summarise(project(moved(i, g))).difference;
+  const refDiffAt = (i: Inputs, g: number) => {
+    const last = refProject(moved(i, g)).rows.at(-1)!;
+    return last.buyerNetWorth - last.renterNetWorth;
+  };
+  const refBisect = (f: (g: number) => number) => {
+    let lo = -10;
+    let hi = 20;
+    expect(Math.sign(f(lo))).not.toBe(Math.sign(f(hi)));
+    for (let k = 0; k < 60; k++) {
+      const mid = (lo + hi) / 2;
+      if (f(mid) < 0) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  };
 
   it("zeroes the nominal difference (sign change within ±0.01pp)", () => {
-    for (const over of [{}, { rent: 1_500 }, { stockReturn: 5, years: 15 }]) {
+    // Changed: diffAt now moves rent growth with house growth (new spec).
+    for (const over of [{}, { rent: 1_500 }, { stockReturn: 5, years: 15 }, { houseGrowth: 4, rentGrowth: 2 }]) {
       const i = inp(over);
       const g = breakevenHouseGrowth(i);
       expect(g).not.toBeNull();
@@ -929,31 +1075,35 @@ describe("breakevenHouseGrowth", () => {
   });
 
   it("agrees with a bisection on the reference model", () => {
+    // Changed: the reference bisection now moves rent growth with house growth.
+    for (const i of [USER_EXAMPLE, inp({ houseGrowth: 4, rentGrowth: 2 }), inp({ followOnRate: 6 })]) {
+      const lo = refBisect((g) => refDiffAt(i, g));
+      expect(Math.abs(breakevenHouseGrowth(i)! - lo)).toBeLessThan(0.01);
+    }
+  });
+
+  it("differs from the old fixed-rent-growth answer for USER_EXAMPLE", () => {
+    // Reference bisections: moving rent growth ≈ +1.22%; holding it at 3% ≈ −5.34%.
+    // Guard that the two definitions really are far apart, then check the function
+    // follows the new one.
     const i = USER_EXAMPLE;
-    const refDiff = (g: number) => {
+    const newG = refBisect((g) => refDiffAt(i, g));
+    const oldG = refBisect((g) => {
       const last = refProject({ ...i, houseGrowth: g }).rows.at(-1)!;
       return last.buyerNetWorth - last.renterNetWorth;
-    };
-    let lo = -10;
-    let hi = 20;
-    expect(Math.sign(refDiff(lo))).not.toBe(Math.sign(refDiff(hi)));
-    for (let k = 0; k < 60; k++) {
-      const mid = (lo + hi) / 2;
-      if (refDiff(mid) < 0) lo = mid;
-      else hi = mid;
-    }
-    expect(Math.abs(breakevenHouseGrowth(i)! - lo)).toBeLessThan(0.01);
+    });
+    expect(Math.abs(newG - oldG)).toBeGreaterThan(1);
+    const g = breakevenHouseGrowth(i)!;
+    expect(Math.abs(g - newG)).toBeLessThan(0.01);
+    expect(Math.abs(g - oldG)).toBeGreaterThan(1);
   });
 
   it("returns null when the difference doesn't change sign in −10%..+20%", () => {
     // 1-year horizon, 50% selling costs, free rent: renter wins even at +20% growth.
+    // (Rent is 0, so moving rent growth changes nothing here.)
     const i = inp({ years: 1, sellingCostPct: 50, rent: 0 });
-    const ref = (g: number) => {
-      const last = refProject({ ...i, houseGrowth: g }).rows[1];
-      return last.buyerNetWorth - last.renterNetWorth;
-    };
-    expect(ref(20)).toBeLessThan(0);
-    expect(ref(-10)).toBeLessThan(0);
+    expect(refDiffAt(i, 20)).toBeLessThan(0);
+    expect(refDiffAt(i, -10)).toBeLessThan(0);
     expect(breakevenHouseGrowth(i)).toBeNull();
   });
 });
@@ -975,7 +1125,15 @@ describe("yearOneCosts", () => {
     close(y.lodgerIncome, 10_200, "lodgerIncome");
     close(y.opportunityCost, 108_000 * 0.07, "opportunityCost"); // 7,560
     close(y.expectedGrowth, 500_000 * 0.03, "expectedGrowth"); // 15,000
-    close(y.buyTotal, y.interest + y.runningCosts - y.lodgerIncome + y.opportunityCost - y.expectedGrowth, "buyTotal");
+    // New: (SDLT 10,000 + fees 3,000 + 2% × 500,000 = 10,000) / 30 years = 766.67
+    close(y.transactionCostsPerYear, 23_000 / 30, "transactionCostsPerYear");
+    close(y.buyBeforeGrowth,
+      y.interest + y.runningCosts - y.lodgerIncome + y.opportunityCost + y.transactionCostsPerYear, "buyBeforeGrowth");
+    // Changed: buyTotal now includes the spread transaction costs (new spec).
+    close(y.buyTotal,
+      y.interest + y.runningCosts - y.lodgerIncome + y.opportunityCost + 23_000 / 30 - y.expectedGrowth, "buyTotal");
+    close(y.buyTotal, y.buyBeforeGrowth - y.expectedGrowth, "buyTotal identity");
+    close(y.fivePercentRule, 25_000, "fivePercentRule");
   });
 
   it("0% rates: interest 0, running costs = service charge + maintenance on a flat price", () => {
@@ -984,14 +1142,35 @@ describe("yearOneCosts", () => {
     close(y.runningCosts, 7_000, "runningCosts"); // 2,000 + 1% × 500,000
     close(y.opportunityCost, 5_400, "opp"); // 108,000 × 5%
     close(y.expectedGrowth, 0, "growth");
-    close(y.buyTotal, 7_000 + 5_400, "buyTotal");
+    // New: FLAT has years 1 and 0% selling costs → (10,000 + 3,000 + 0) / 1 = 13,000.
+    close(y.transactionCostsPerYear, 13_000, "transactionCostsPerYear");
+    // Changed from 7,000 + 5,400: buyTotal now adds the 13,000 of spread transaction costs.
+    close(y.buyTotal, 7_000 + 5_400 + 13_000, "buyTotal");
+    // growthNeeded = (25,400 − 24,000) / 500,000 × 100 = 0.28%
+    close(y.growthNeeded, 0.28, "growthNeeded");
   });
 });
 
-describe("spec clarifications: yearOneCosts ignores the horizon", () => {
-  it("returns the same year-one figures whatever years is set to", () => {
+describe("spec clarifications: yearOneCosts describes year one; one-off costs spread over years", () => {
+  // Changed: the old spec said yearOneCosts ignored `years` entirely. The new spec
+  // spreads the one-off costs over `years` (treated as 1 when < 1), so only the
+  // year-one flow figures are horizon-independent now.
+  it("years < 1 is treated as 1", () => {
     const one = yearOneCosts({ ...USER_EXAMPLE, years: 1 });
-    expect(yearOneCosts({ ...USER_EXAMPLE, years: 30 })).toEqual(one);
     expect(yearOneCosts({ ...USER_EXAMPLE, years: 0 })).toEqual(one);
+    close(one.transactionCostsPerYear, 23_000, "all transaction costs in one year");
+  });
+
+  it("year-one flow figures don't depend on years; the spread costs do", () => {
+    const one = yearOneCosts({ ...USER_EXAMPLE, years: 1 });
+    const thirty = yearOneCosts({ ...USER_EXAMPLE, years: 30 });
+    for (const k of ["rent", "interest", "runningCosts", "lodgerIncome", "opportunityCost",
+      "expectedGrowth", "fivePercentRule"] as const) {
+      close(thirty[k], one[k], k);
+    }
+    close(one.transactionCostsPerYear, 23_000, "1 year");
+    close(thirty.transactionCostsPerYear, 23_000 / 30, "30 years");
+    close(one.buyBeforeGrowth - thirty.buyBeforeGrowth, 23_000 - 23_000 / 30, "buyBeforeGrowth");
+    close(one.buyTotal - thirty.buyTotal, 23_000 - 23_000 / 30, "buyTotal");
   });
 });
