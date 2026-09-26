@@ -20,11 +20,19 @@
  * reset at month fixYears × 12 (if still within the term) to
  * mortgagePayment(balance then, followOnRate, mortgageTerm − fixYears).
  * Interest-only pays interest at that month's rate.
+ *
+ * Growth race (`houseGain`, `renterInvestmentGain`, `buyerInvestmentGain`, and
+ * `compoundingOvertakesYear`): houseGain = property value at the end of the year
+ * minus at the start; each investment gain = Σ over the 12 months of
+ * (ISA + GIA after that month's flow) × monthly stock rate, before tax. All 0 on
+ * row 0. compoundingOvertakesYear = first year ≥ 1 with
+ * renterInvestmentGain ≥ houseGain, else null.
  */
 import { describe, expect, it } from "vitest";
 import {
   USER_EXAMPLE,
   breakevenHouseGrowth,
+  compoundingOvertakesYear,
   project,
   summarise,
   upfrontCosts,
@@ -205,6 +213,10 @@ interface RefRow {
   buyerPortfolio: number;
   buyerNetWorth: number;
   deflator: number;
+  // growth race (per year; 0 on row 0)
+  houseGain: number;
+  renterInvestmentGain: number;
+  buyerInvestmentGain: number;
 }
 
 function refProject(i: Inputs) {
@@ -257,7 +269,8 @@ function refProject(i: Inputs) {
     };
   };
 
-  const zero = { rentPaid: 0, renterInvested: 0, mortgagePaid: 0, interestPaid: 0, runningCosts: 0, lodgerIncome: 0, buyerInvested: 0, budget: 0 };
+  const zero = { rentPaid: 0, renterInvested: 0, mortgagePaid: 0, interestPaid: 0, runningCosts: 0, lodgerIncome: 0, buyerInvested: 0, budget: 0,
+    houseGain: 0, renterInvestmentGain: 0, buyerInvestmentGain: 0 };
   const rows: RefRow[] = [snapshot(0, zero)];
 
   for (let y = 0; y < i.years; y++) {
@@ -273,6 +286,7 @@ function refProject(i: Inputs) {
     const serviceM = (i.serviceCharge * Math.pow(1 + i.inflation / 100, y)) / 12;
 
     const f = { ...zero, budget: budgetYear };
+    const valueAtStart = value;
     for (let m = 0; m < 12; m++) {
       const month = y * 12 + m;
       // 1. mortgage: starting rate during the fix, follow-on rate from month fixMonths.
@@ -306,6 +320,10 @@ function refProject(i: Inputs) {
       const buyerFlow = budgetM - housing;
       applyFlow(renter, renterFlow, i.useIsa);
       applyFlow(buyer, buyerFlow, i.useIsa);
+      // Growth race: this month's growth on (ISA + GIA after the flow), before tax.
+      // A shortfall holds no investments, so it contributes nothing.
+      f.renterInvestmentGain += (renter.isa + renter.gia) * stockM;
+      f.buyerInvestmentGain += (buyer.isa + buyer.gia) * stockM;
       // 4. portfolios grow
       for (const p of [renter, buyer]) {
         p.isa *= 1 + stockM;
@@ -322,6 +340,7 @@ function refProject(i: Inputs) {
       f.renterInvested += renterFlow;
       f.buyerInvested += buyerFlow;
     }
+    f.houseGain = value - valueAtStart;
     totals.rent += f.rentPaid;
     totals.interest += f.interestPaid;
     totals.runningCosts += f.runningCosts;
@@ -362,6 +381,15 @@ const ROW_FIELDS: (keyof RefRow)[] = [
   "propertyValue", "mortgageBalance", "equity", "buyerPortfolio", "buyerNetWorth",
   "deflator",
 ];
+
+/** Growth-race row fields, compared in their own block so older checks stay independent. */
+const GROWTH_FIELDS: (keyof RefRow)[] = ["houseGain", "renterInvestmentGain", "buyerInvestmentGain"];
+
+/** Spec: first year ≥ 1 with renterInvestmentGain ≥ houseGain, else null. */
+function refOvertakes(rows: RefRow[]): number | null {
+  const idx = rows.findIndex((r, n) => n >= 1 && r.renterInvestmentGain >= r.houseGain);
+  return idx === -1 ? null : idx;
+}
 
 /** Within a penny, or 1e-9 relative for large numbers. */
 function close(actual: number, expected: number, label = ""): void {
@@ -441,6 +469,27 @@ describe("reference model self-check (hand numbers)", () => {
     const couple = refProject(inp({ ...FLAT, earners: 2 }));
     close(couple.takeHome, 2 * TAKE_HOME_90K, "couple takeHome");
     close(couple.rows[1].budget, BUDGET_COUPLE_90K, "couple budget");
+  });
+
+  it("growth-race anchors (hand numbers)", () => {
+    // USER_EXAMPLE year 1: houseGain = 500,000 × 3% = 15,000; year 2 = 515,000 × 3% = 15,450.
+    const u = refProject(USER_EXAMPLE);
+    close(u.rows[1].houseGain, 15_000, "houseGain y1");
+    close(u.rows[2].houseGain, 15_450, "houseGain y2");
+    // Renter year 1: pot P = 108,000, flow c = (49,757.40 − 24,000)/12 = 2,146.45 a month,
+    // s = 1.07^(1/12) − 1. Σ (pot after flow) × s = P × 0.07 + c × ((1+s) × 0.07/s − 12).
+    const s = 1.07 ** (1 / 12) - 1;
+    const c = (BUDGET_DEFAULT - 24_000) / 12;
+    close(u.rows[1].renterInvestmentGain, CASH_NEEDED_DEFAULT * 0.07 + c * ((1 + s) * 0.07 / s - 12), "renter gain y1");
+    // Row 0 is all zero.
+    for (const f of GROWTH_FIELDS) expect(u.rows[0][f]).toBe(0);
+    // Zero renter flows, 3% house growth, 7% stocks: renter gain 7,560 × 1.07^(n−1) vs
+    // house gain 15,000 × 1.03^(n−1). (1.07/1.03)^(n−1) ≥ 15,000/7,560 = 1.98413
+    // ⇔ n − 1 ≥ ln 1.98413 / ln(1.07/1.03) = 0.685179 / 0.0380998 = 17.98 → n = 19.
+    const z = refProject(inp({ ...FLAT, years: 30, houseGrowth: 3, stockReturn: 7, livingCosts: TAKE_HOME_90K - 24_000 }));
+    expect(refOvertakes(z.rows)).toBe(19);
+    // USER_EXAMPLE: renter gains 8,527 / 10,955 / 13,609 / 16,506 vs house 15,000 / 15,450 / 15,914 / 16,391.
+    expect(refOvertakes(u.rows)).toBe(4);
   });
 });
 
@@ -1172,5 +1221,40 @@ describe("spec clarifications: yearOneCosts describes year one; one-off costs sp
     close(thirty.transactionCostsPerYear, 23_000 / 30, "30 years");
     close(one.buyBeforeGrowth - thirty.buyBeforeGrowth, 23_000 - 23_000 / 30, "buyBeforeGrowth");
     close(one.buyTotal - thirty.buyTotal, 23_000 - 23_000 / 30, "buyTotal");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Growth race: houseGain, renter/buyerInvestmentGain, compoundingOvertakesYear
+// ---------------------------------------------------------------------------
+
+describe("growth race: project() matches the reference simulation", () => {
+  for (const [name, over] of SCENARIOS) {
+    it(name, () => {
+      const i = inp(over);
+      const actual = project(i);
+      const expected = refProject(i);
+      for (let n = 0; n <= i.years; n++) {
+        const a = actual.rows[n] as unknown as Record<string, number>;
+        const e = expected.rows[n] as unknown as Record<string, number>;
+        for (const f of GROWTH_FIELDS) close(a[f], e[f], `row ${n} ${f}`);
+      }
+    });
+  }
+});
+
+describe("growth race: compoundingOvertakesYear matches the reference", () => {
+  it("every scenario", () => {
+    for (const [name, over] of SCENARIOS) {
+      const i = inp(over);
+      expect(compoundingOvertakesYear(project(i)), name).toBe(refOvertakes(refProject(i).rows));
+    }
+  });
+
+  it("the scenarios cover early, mid-horizon and late answers", () => {
+    const years = SCENARIOS.map(([, over]) => refOvertakes(refProject(inp(over)).rows));
+    expect(years).toContain(1);
+    expect(years.some((y) => y !== null && y > 1 && y < 10)).toBe(true);
+    expect(years.some((y) => y !== null && y >= 10)).toBe(true);
   });
 });
